@@ -12,7 +12,6 @@ make run     # or run directly
 make clean   # remove binary
 ```
 
-Config and credentials are auto-created on first run in `.supremo/`. Defaults to Gemini.
 
 Set your API key and model from the CLI:
 ```
