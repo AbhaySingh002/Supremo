@@ -97,7 +97,22 @@ func NewRegistry() *Registry {
 		},
 	})
 
-	// 6. /config
+	// 6. /model
+	r.Register(Command{
+		Name:        "/model",
+		Description: "Change model (e.g. gemini-2.5-flash)",
+		Execute: func(ctx context.Context, app *app.App, session *agent.Session, args []string) (string, error) {
+			if len(args) == 0 {
+				return "", fmt.Errorf("usage: /model <model_name>")
+			}
+			if err := app.ProviderManager.UpdateModel(ctx, args[0]); err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("Model updated to %s.", args[0]), nil
+		},
+	})
+
+	// 7. /config
 	r.Register(Command{
 		Name:        "/config",
 		Description: "View or reload configuration",
@@ -124,7 +139,7 @@ func (r *Registry) Register(cmd Command) {
 
 // List returns all registered commands sorted by name.
 func (r *Registry) List() []Command {
-	names := []string{"/help", "/clear", "/reset", "/auth", "/config", "/exit"}
+	names := []string{"/help", "/clear", "/reset", "/auth", "/model", "/config", "/exit"}
 	var list []Command
 	for _, name := range names {
 		if cmd, ok := r.commands[name]; ok {

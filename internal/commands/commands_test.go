@@ -10,11 +10,11 @@ import (
 func TestCommands_Registry(t *testing.T) {
 	r := NewRegistry()
 	list := r.List()
-	if len(list) != 6 {
-		t.Fatalf("expected 6 commands, got %d", len(list))
+	if len(list) != 7 {
+		t.Fatalf("expected 7 commands, got %d", len(list))
 	}
 
-	expectedNames := []string{"/help", "/clear", "/reset", "/auth", "/config", "/exit"}
+	expectedNames := []string{"/help", "/clear", "/reset", "/auth", "/model", "/config", "/exit"}
 	for i, cmd := range list {
 		if cmd.Name != expectedNames[i] {
 			t.Errorf("expected command %d to be %s, got %s", i, expectedNames[i], cmd.Name)
