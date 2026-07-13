@@ -50,27 +50,27 @@ func (t *CreateDirectory) Schema() any {
 func (t *CreateDirectory) Execute(ctx context.Context, input any) (*tools.ToolResult, error) {
 	// Parse input
 	var parsed CreateDirectoryInput
-	if err := ParseInput(input, &parsed); err != nil {
+	if err := tools.ParseInput(input, &parsed); err != nil {
 		return nil, err
 	}
 
 	// Validate and resolve path
-	absPath, err := ValidateAndResolvePath(parsed.Path)
+	absPath, err := tools.ValidateAndResolvePath(parsed.Path)
 	if err != nil {
-		return BuildToolResult(false, "Path cannot be empty or is invalid", nil), nil
+		return tools.BuildToolResult(false, "Path cannot be empty or is invalid", nil), nil
 	}
 
 	// Ensure parent directory exists
 	parentDir := filepath.Dir(absPath)
 	if parentDir != absPath { // Don't check if parent is root
 		if err := EnsureParentDirectoryExists(absPath); err != nil {
-			return BuildToolResult(false, "Parent directory does not exist", nil), nil
+			return tools.BuildToolResult(false, "Parent directory does not exist", nil), nil
 		}
 	}
 
 	// Check if directory already exists
-	if _, err := PathExists(absPath); err == nil {
-		return BuildToolResult(false, "Directory already exists", nil), nil
+	if _, err := tools.PathExists(absPath); err == nil {
+		return tools.BuildToolResult(false, "Directory already exists", nil), nil
 	}
 
 	// Create the directory
@@ -88,10 +88,10 @@ func (t *CreateDirectory) Execute(ctx context.Context, input any) (*tools.ToolRe
 	}
 
 	// Convert output to map for ToolResult
-	dataMap, err := SerializeOutput(output)
+	dataMap, err := tools.SerializeOutput(output)
 	if err != nil {
-		return BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
+		return tools.BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
 	}
 
-	return BuildToolResult(true, "Directory created successfully", dataMap), nil
+	return tools.BuildToolResult(true, "Directory created successfully", dataMap), nil
 }

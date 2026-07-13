@@ -31,7 +31,7 @@ func (r *Registry) Get(name string) (Tool, error) {
 	tool, ok := r.tools[name]
 
 	if !ok {
-		return nil, fmt.Errorf("tool not found")
+		return nil, ErrToolNotFound
 	}
 
 	return tool, nil

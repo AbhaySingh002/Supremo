@@ -72,27 +72,27 @@ func (t *FindReferences) Schema() any {
 func (t *FindReferences) Execute(ctx context.Context, input any) (*tools.ToolResult, error) {
 	// Parse input
 	var parsed FindReferencesInput
-	if err := ParseInput(input, &parsed); err != nil {
+	if err := tools.ParseInput(input, &parsed); err != nil {
 		return nil, err
 	}
 
 	// Validate inputs
 	if parsed.Directory == "" {
-		return BuildToolResult(false, "Directory cannot be empty", nil), nil
+		return tools.BuildToolResult(false, "Directory cannot be empty", nil), nil
 	}
 	if parsed.Symbol == "" {
-		return BuildToolResult(false, "Symbol cannot be empty", nil), nil
+		return tools.BuildToolResult(false, "Symbol cannot be empty", nil), nil
 	}
 
 	// Validate and resolve path
-	absPath, err := ValidateAndResolvePath(parsed.Directory)
+	absPath, err := tools.ValidateAndResolvePath(parsed.Directory)
 	if err != nil {
-		return BuildToolResult(false, "Failed to resolve absolute path: "+err.Error(), nil), nil
+		return tools.BuildToolResult(false, "Failed to resolve absolute path: "+err.Error(), nil), nil
 	}
 
 	// Check if path exists
-	if _, err := PathExists(absPath); err != nil {
-		return BuildToolResult(false, "Directory does not exist", nil), nil
+	if _, err := tools.PathExists(absPath); err != nil {
+		return tools.BuildToolResult(false, "Directory does not exist", nil), nil
 	}
 
 	// Build regex pattern for symbol references
@@ -116,7 +116,7 @@ func (t *FindReferences) Execute(ctx context.Context, input any) (*tools.ToolRes
 
 		// Skip hidden files
 		baseName := filepath.Base(path)
-		if IsHidden(baseName) {
+		if tools.IsHidden(baseName) {
 			return nil
 		}
 
@@ -172,10 +172,10 @@ func (t *FindReferences) Execute(ctx context.Context, input any) (*tools.ToolRes
 	}
 
 	// Convert output to map for ToolResult
-	dataMap, err := SerializeOutput(output)
+	dataMap, err := tools.SerializeOutput(output)
 	if err != nil {
-		return BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
+		return tools.BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
 	}
 
-	return BuildToolResult(true, "Reference search completed", dataMap), nil
+	return tools.BuildToolResult(true, "Reference search completed", dataMap), nil
 }

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"time"
 
 	"github.com/AbhaySingh002/supremo/internal/models"
 	"github.com/AbhaySingh002/supremo/internal/parser"
@@ -17,11 +18,6 @@ type Provider interface {
 // Parser defines the interface for parsing LLM output into tool calls or final answers.
 type Parser interface {
 	Parse(response string) (*parser.Response, error)
-}
-
-// PromptBuilder defines the interface for constructing system prompts.
-type PromptBuilder interface {
-	BuildSystemPrompt(ctx context.Context, session *Session) (string, error)
 }
 
 // ContextBuilder defines the interface for constructing conversation context.
@@ -51,7 +47,6 @@ type Agent struct {
 	provider       Provider
 	toolManager    *tools.Manager
 	parser         Parser
-	promptBuilder  PromptBuilder
 	contextBuilder ContextBuilder
 	runtimeManager RuntimeManager
 	memory         Memory
@@ -63,7 +58,6 @@ func NewAgent(
 	provider Provider,
 	toolManager *tools.Manager,
 	parser Parser,
-	promptBuilder PromptBuilder,
 	contextBuilder ContextBuilder,
 	runtimeManager RuntimeManager,
 	memory Memory,
@@ -72,7 +66,6 @@ func NewAgent(
 		provider:       provider,
 		toolManager:    toolManager,
 		parser:         parser,
-		promptBuilder:  promptBuilder,
 		contextBuilder: contextBuilder,
 		runtimeManager: runtimeManager,
 		memory:         memory,
@@ -87,4 +80,32 @@ func (a *Agent) Memory() Memory {
 // SetDebug enables or disables debug logging for the agent loop.
 func (a *Agent) SetDebug(enabled bool) {
 	a.debug = enabled
+}
+
+// executeAll runs all tool calls in a parsed response sequentially, stopping on first error.
+func (a *Agent) executeAll(ctx context.Context, resp *parser.Response, stream EventStream) ([]Observation, error) {
+	if resp == nil || len(resp.ToolCalls) == 0 {
+		return nil, nil
+	}
+
+	var observations []Observation
+	for _, tc := range resp.ToolCalls {
+		if stream != nil {
+			stream.Emit(Event{Type: EventToolStarted, Payload: tc.Name, Timestamp: time.Now()})
+		}
+
+		res, err := a.toolManager.Execute(ctx, tc.Name, tc.Arguments)
+		obs := NewObservation(tc.Name, res, err)
+		observations = append(observations, obs)
+
+		if stream != nil {
+			stream.Emit(Event{Type: EventToolFinished, Payload: obs, Timestamp: time.Now()})
+		}
+
+		if err != nil || !obs.Success {
+			break
+		}
+	}
+
+	return observations, nil
 }

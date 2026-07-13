@@ -67,13 +67,13 @@ func (t *RunFormatter) Schema() any {
 func (t *RunFormatter) Execute(ctx context.Context, input any) (*tools.ToolResult, error) {
 	// Parse input
 	var parsed RunFormatterInput
-	if err := ParseInput(input, &parsed); err != nil {
+	if err := tools.ParseInput(input, &parsed); err != nil {
 		return nil, err
 	}
 
 	// Validate directory
-	if err := ValidateDirectory(parsed.Directory); err != nil {
-		return BuildToolResult(false, "Directory cannot be empty", nil), nil
+	if err := tools.ValidateDirectory(parsed.Directory); err != nil {
+		return tools.BuildToolResult(false, "Directory cannot be empty", nil), nil
 	}
 
 	// Detect formatter based on project files
@@ -127,7 +127,7 @@ func (t *RunFormatter) Execute(ctx context.Context, input any) (*tools.ToolResul
 	// Execute command and capture output
 	cmdOutput, err := ExecuteCommandWithOutput(cmdCtx, cmd)
 	if err != nil {
-		return BuildToolResult(false, "Failed to execute command: "+err.Error(), nil), nil
+		return tools.BuildToolResult(false, "Failed to execute command: "+err.Error(), nil), nil
 	}
 
 	exitCode := cmdOutput.ExitCode
@@ -143,9 +143,9 @@ func (t *RunFormatter) Execute(ctx context.Context, input any) (*tools.ToolResul
 	}
 
 	// Convert output to map for ToolResult
-	dataMap, err := SerializeOutput(output)
+	dataMap, err := tools.SerializeOutput(output)
 	if err != nil {
-		return BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
+		return tools.BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
 	}
 
 	success := exitCode == 0
@@ -156,7 +156,7 @@ func (t *RunFormatter) Execute(ctx context.Context, input any) (*tools.ToolResul
 		message = "Formatting failed"
 	}
 
-	return BuildToolResult(success, message, dataMap), nil
+	return tools.BuildToolResult(success, message, dataMap), nil
 }
 
 // detectFormatter detects the formatter based on project files

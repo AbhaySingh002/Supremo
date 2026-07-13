@@ -22,8 +22,6 @@ func (a *Agent) Run(
 		Finished:         false,
 	}
 
-	executor := NewExecutor(a.toolManager)
-
 	// Append user input to memory
 	if err := a.memory.Append(ctx, session.ID, models.Message{
 		Role:    models.RoleUser,
@@ -36,7 +34,6 @@ func (a *Agent) Run(
 	for !state.Finished && state.CurrentIteration < state.MaxIterations {
 		select {
 		case <-ctx.Done():
-			state.Cancelled = true
 			state.LastError = ctx.Err()
 			return "", ctx.Err()
 		default:
@@ -109,17 +106,13 @@ func (a *Agent) Run(
 
 		// 5. Execute Tool Calls if present
 		if len(parsed.ToolCalls) > 0 {
-			observations, execErr := executor.ExecuteAll(ctx, parsed, stream)
+			observations, execErr := a.executeAll(ctx, parsed, stream)
 			if execErr != nil {
 				state.LastError = execErr
 				return "", execErr
 			}
 
-			if len(observations) > 0 {
-				state.CurrentTool = observations[len(observations)-1].ToolName
-			}
-
-			for i, obs := range observations {
+				for i, obs := range observations {
 				if a.debug {
 					fmt.Printf("[DEBUG] OBSERVATION[%d] (%s):\n%s\n", i, obs.ToolName, obs.Output)
 				}

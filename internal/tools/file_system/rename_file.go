@@ -55,39 +55,39 @@ func (t *RenameFile) Schema() any {
 func (t *RenameFile) Execute(ctx context.Context, input any) (*tools.ToolResult, error) {
 	// Parse input
 	var parsed RenameFileInput
-	if err := ParseInput(input, &parsed); err != nil {
+	if err := tools.ParseInput(input, &parsed); err != nil {
 		return nil, err
 	}
 
 	// Validate paths are not empty
 	if parsed.OldPath == "" || parsed.NewPath == "" {
-		return BuildToolResult(false, "Paths cannot be empty", nil), nil
+		return tools.BuildToolResult(false, "Paths cannot be empty", nil), nil
 	}
 
 	// Validate and resolve paths
-	oldAbsPath, err := ValidateAndResolvePath(parsed.OldPath)
+	oldAbsPath, err := tools.ValidateAndResolvePath(parsed.OldPath)
 	if err != nil {
-		return BuildToolResult(false, "Failed to resolve old path: "+err.Error(), nil), nil
+		return tools.BuildToolResult(false, "Failed to resolve old path: "+err.Error(), nil), nil
 	}
 
-	newAbsPath, err := ValidateAndResolvePath(parsed.NewPath)
+	newAbsPath, err := tools.ValidateAndResolvePath(parsed.NewPath)
 	if err != nil {
-		return BuildToolResult(false, "Failed to resolve new path: "+err.Error(), nil), nil
+		return tools.BuildToolResult(false, "Failed to resolve new path: "+err.Error(), nil), nil
 	}
 
 	// Check if old path exists
-	if _, err := PathExists(oldAbsPath); err != nil {
-		return BuildToolResult(false, "Old path does not exist", nil), nil
+	if _, err := tools.PathExists(oldAbsPath); err != nil {
+		return tools.BuildToolResult(false, "Old path does not exist", nil), nil
 	}
 
 	// Check if new path already exists
-	if _, err := PathExists(newAbsPath); err == nil {
-		return BuildToolResult(false, "New path already exists", nil), nil
+	if _, err := tools.PathExists(newAbsPath); err == nil {
+		return tools.BuildToolResult(false, "New path already exists", nil), nil
 	}
 
 	// Ensure parent directory of new path exists
 	if err := EnsureParentDirectoryExists(newAbsPath); err != nil {
-		return BuildToolResult(false, "Parent directory of new path does not exist", nil), nil
+		return tools.BuildToolResult(false, "Parent directory of new path does not exist", nil), nil
 	}
 
 	// Rename the file or directory
@@ -106,10 +106,10 @@ func (t *RenameFile) Execute(ctx context.Context, input any) (*tools.ToolResult,
 	}
 
 	// Convert output to map for ToolResult
-	dataMap, err := SerializeOutput(output)
+	dataMap, err := tools.SerializeOutput(output)
 	if err != nil {
-		return BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
+		return tools.BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
 	}
 
-	return BuildToolResult(true, "Renamed successfully", dataMap), nil
+	return tools.BuildToolResult(true, "Renamed successfully", dataMap), nil
 }

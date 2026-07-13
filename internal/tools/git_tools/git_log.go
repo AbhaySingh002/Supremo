@@ -64,18 +64,18 @@ func (t *GitLog) Schema() any {
 func (t *GitLog) Execute(ctx context.Context, input any) (*tools.ToolResult, error) {
 	// Parse input
 	var parsed GitLogInput
-	if err := ParseInput(input, &parsed); err != nil {
+	if err := tools.ParseInput(input, &parsed); err != nil {
 		return nil, err
 	}
 
 	// Validate directory
-	if err := ValidateDirectory(parsed.Directory); err != nil {
-		return BuildToolResult(false, "Directory cannot be empty", nil), nil
+	if err := tools.ValidateDirectory(parsed.Directory); err != nil {
+		return tools.BuildToolResult(false, "Directory cannot be empty", nil), nil
 	}
 
 	// Check if directory is a git repository
 	if err := IsGitRepository(parsed.Directory); err != nil {
-		return BuildToolResult(false, "Not a git repository", nil), nil
+		return tools.BuildToolResult(false, "Not a git repository", nil), nil
 	}
 
 	// Set default limit
@@ -126,10 +126,10 @@ func (t *GitLog) Execute(ctx context.Context, input any) (*tools.ToolResult, err
 	}
 
 	// Convert output to map for ToolResult
-	dataMap, err := SerializeOutput(outputData)
+	dataMap, err := tools.SerializeOutput(outputData)
 	if err != nil {
-		return BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
+		return tools.BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
 	}
 
-	return BuildToolResult(true, "Git log retrieved", dataMap), nil
+	return tools.BuildToolResult(true, "Git log retrieved", dataMap), nil
 }

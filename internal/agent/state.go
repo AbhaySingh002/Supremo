@@ -5,7 +5,5 @@ type State struct {
 	CurrentIteration int
 	MaxIterations    int
 	Finished         bool
-	CurrentTool      string
 	LastError        error
-	Cancelled        bool
 }

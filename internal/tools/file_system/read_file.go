@@ -50,28 +50,28 @@ func (t *ReadFile) Schema() any {
 func (t *ReadFile) Execute(ctx context.Context, input any) (*tools.ToolResult, error) {
 	// Parse input
 	var parsed ReadFileInput
-	if err := ParseInput(input, &parsed); err != nil {
+	if err := tools.ParseInput(input, &parsed); err != nil {
 		return nil, err
 	}
 
 	// Validate and resolve path
-	absPath, err := ValidateAndResolvePath(parsed.Path)
+	absPath, err := tools.ValidateAndResolvePath(parsed.Path)
 	if err != nil {
-		return BuildToolResult(false, "Path cannot be empty or is invalid", nil), nil
+		return tools.BuildToolResult(false, "Path cannot be empty or is invalid", nil), nil
 	}
 
 	// Check if path exists and is a file
-	info, err := PathExists(absPath)
+	info, err := tools.PathExists(absPath)
 	if err != nil {
-		return BuildToolResult(false, "File does not exist", nil), nil
+		return tools.BuildToolResult(false, "File does not exist", nil), nil
 	}
 
 	isDir, err := IsDirectory(absPath)
 	if err != nil {
-		return BuildToolResult(false, "Failed to check path type: "+err.Error(), nil), nil
+		return tools.BuildToolResult(false, "Failed to check path type: "+err.Error(), nil), nil
 	}
 	if isDir {
-		return BuildToolResult(false, "Path is a directory, not a file", nil), nil
+		return tools.BuildToolResult(false, "Path is a directory, not a file", nil), nil
 	}
 
 	// Read file content
@@ -90,10 +90,10 @@ func (t *ReadFile) Execute(ctx context.Context, input any) (*tools.ToolResult, e
 	}
 
 	// Convert output to map for ToolResult
-	dataMap, err := SerializeOutput(output)
+	dataMap, err := tools.SerializeOutput(output)
 	if err != nil {
-		return BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
+		return tools.BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
 	}
 
-	return BuildToolResult(true, "File read successfully", dataMap), nil
+	return tools.BuildToolResult(true, "File read successfully", dataMap), nil
 }

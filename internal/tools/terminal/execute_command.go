@@ -70,13 +70,13 @@ func (t *ExecuteCommand) Schema() any {
 func (t *ExecuteCommand) Execute(ctx context.Context, input any) (*tools.ToolResult, error) {
 	// Parse input
 	var parsed ExecuteCommandInput
-	if err := ParseInput(input, &parsed); err != nil {
+	if err := tools.ParseInput(input, &parsed); err != nil {
 		return nil, err
 	}
 
 	// Validate command is not empty
 	if parsed.Command == "" {
-		return BuildToolResult(false, "Command cannot be empty", nil), nil
+		return tools.BuildToolResult(false, "Command cannot be empty", nil), nil
 	}
 
 	// Security: Block dangerous commands
@@ -111,7 +111,7 @@ func (t *ExecuteCommand) Execute(ctx context.Context, input any) (*tools.ToolRes
 	// Execute command and capture output
 	cmdOutput, err := ExecuteCommandWithOutput(cmdCtx, cmd)
 	if err != nil {
-		return BuildToolResult(false, "Failed to execute command: "+err.Error(), nil), nil
+		return tools.BuildToolResult(false, "Failed to execute command: "+err.Error(), nil), nil
 	}
 
 	exitCode := cmdOutput.ExitCode
@@ -126,9 +126,9 @@ func (t *ExecuteCommand) Execute(ctx context.Context, input any) (*tools.ToolRes
 	}
 
 	// Convert output to map for ToolResult
-	dataMap, err := SerializeOutput(output)
+	dataMap, err := tools.SerializeOutput(output)
 	if err != nil {
-		return BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
+		return tools.BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
 	}
 
 	success := exitCode == 0
@@ -139,5 +139,5 @@ func (t *ExecuteCommand) Execute(ctx context.Context, input any) (*tools.ToolRes
 		message = "Command failed with exit code " + string(rune('0'+exitCode))
 	}
 
-	return BuildToolResult(success, message, dataMap), nil
+	return tools.BuildToolResult(success, message, dataMap), nil
 }

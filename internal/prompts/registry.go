@@ -18,7 +18,6 @@ func NewRegistry() *Registry {
 	r.Register(TemplateCoding)
 	r.Register(TemplateTools)
 	r.Register(TemplatePlanner)
-	r.Register(TemplateReview)
 	r.Register(TemplateResponse)
 	return r
 }

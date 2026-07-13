@@ -2,32 +2,9 @@ package terminal
 
 import (
 	"context"
-	"encoding/json"
 	"os/exec"
 	"syscall"
-
-	"github.com/AbhaySingh002/supremo/internal/tools"
 )
-
-// ParseInput parses input into the target struct using JSON marshaling.
-func ParseInput(input any, target any) error {
-	inputBytes, err := json.Marshal(input)
-	if err != nil {
-		return tools.ErrInvalidInput
-	}
-	if err := json.Unmarshal(inputBytes, target); err != nil {
-		return tools.ErrInvalidInput
-	}
-	return nil
-}
-
-// ValidateDirectory validates that a directory is not empty.
-func ValidateDirectory(directory string) error {
-	if directory == "" {
-		return tools.ErrInvalidInput
-	}
-	return nil
-}
 
 // CommandOutput captures stdout and stderr from a command execution.
 type CommandOutput struct {
@@ -94,10 +71,6 @@ func ExecuteCommandWithOutput(ctx context.Context, cmd *exec.Cmd) (CommandOutput
 			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
 				exitCode = status.ExitStatus()
 			}
-		} else if exitErr, ok := err.(*exec.ExitError); ok {
-			if status, ok := exitErr.Sys().(interface{ ExitStatus() int }); ok {
-				exitCode = status.ExitStatus()
-			}
 		} else if err == context.DeadlineExceeded {
 			exitCode = -1
 		}
@@ -108,28 +81,4 @@ func ExecuteCommandWithOutput(ctx context.Context, cmd *exec.Cmd) (CommandOutput
 		Stdout:   stdoutBytes,
 		Stderr:   stderrBytes,
 	}, nil
-}
-
-// SerializeOutput converts a struct to a map[string]interface{} for ToolResult.
-func SerializeOutput(output any) (map[string]interface{}, error) {
-	outputMap, err := json.Marshal(output)
-	if err != nil {
-		return nil, err
-	}
-
-	var dataMap map[string]interface{}
-	if err := json.Unmarshal(outputMap, &dataMap); err != nil {
-		return nil, err
-	}
-
-	return dataMap, nil
-}
-
-// BuildToolResult creates a ToolResult with the given parameters.
-func BuildToolResult(success bool, message string, data map[string]interface{}) *tools.ToolResult {
-	return &tools.ToolResult{
-		Success: success,
-		Message: message,
-		Data:    data,
-	}
 }

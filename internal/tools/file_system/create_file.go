@@ -49,24 +49,24 @@ func (t *CreateFile) Schema() any {
 func (t *CreateFile) Execute(ctx context.Context, input any) (*tools.ToolResult, error) {
 	// Parse input
 	var parsed CreateFileInput
-	if err := ParseInput(input, &parsed); err != nil {
+	if err := tools.ParseInput(input, &parsed); err != nil {
 		return nil, err
 	}
 
 	// Validate and resolve path
-	absPath, err := ValidateAndResolvePath(parsed.Path)
+	absPath, err := tools.ValidateAndResolvePath(parsed.Path)
 	if err != nil {
-		return BuildToolResult(false, "Path cannot be empty or is invalid", nil), nil
+		return tools.BuildToolResult(false, "Path cannot be empty or is invalid", nil), nil
 	}
 
 	// Ensure parent directory exists
 	if err := EnsureParentDirectoryExists(absPath); err != nil {
-		return BuildToolResult(false, "Parent directory does not exist", nil), nil
+		return tools.BuildToolResult(false, "Parent directory does not exist", nil), nil
 	}
 
 	// Check if file already exists
-	if _, err := PathExists(absPath); err == nil {
-		return BuildToolResult(false, "File already exists", nil), nil
+	if _, err := tools.PathExists(absPath); err == nil {
+		return tools.BuildToolResult(false, "File already exists", nil), nil
 	}
 
 	// Create the file
@@ -85,10 +85,10 @@ func (t *CreateFile) Execute(ctx context.Context, input any) (*tools.ToolResult,
 	}
 
 	// Convert output to map for ToolResult
-	dataMap, err := SerializeOutput(output)
+	dataMap, err := tools.SerializeOutput(output)
 	if err != nil {
-		return BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
+		return tools.BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
 	}
 
-	return BuildToolResult(true, "File created successfully", dataMap), nil
+	return tools.BuildToolResult(true, "File created successfully", dataMap), nil
 }

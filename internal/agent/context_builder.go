@@ -41,13 +41,11 @@ func (cb *RealContextBuilder) Build(ctx context.Context, session *Session, userI
 	// Prepare template variables
 	vars := map[string]any{
 		"SYSTEM":    "Supremo",
-		"TOOLS":     "", // Will be injected by builder
+		"TOOLS":     "",
 		"WORKSPACE": cb.runtimeManager.GetWorkingDirectory(),
-		"MODEL":     "gemini-3.5-flash", // This should come from config
+		"MODEL":     "gemini-3.5-flash",
 		"TASK":      userInput,
 		"DATE":      time.Now().Format("2006-01-02"),
-		"PLAN":      "", // Could be populated from state if we had planning
-		"MEMORY":    "", // Could be populated from memory if we had history retrieval
 	}
 
 	// Build the prompt document with system templates only

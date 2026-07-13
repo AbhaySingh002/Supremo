@@ -72,7 +72,6 @@ func New() (*App, error) {
 		&git_tools.GitStatus{},
 		&search.FindReferences{},
 		&search.FindSymbol{},
-		&search.ListOpenFiles{},
 		&search.SearchFileName{},
 		&search.SearchText{},
 	}
@@ -105,10 +104,9 @@ func New() (*App, error) {
 	// 9. Get the active provider & Construct Agent using dependency injection.
 	fmt.Println("Initializing Agent...")
 	appAgent := agent.NewAgent(
-		providerManager, // Manager implements agent.Provider interface via Chat()
+		providerManager,
 		toolManager,
 		defaultParser,
-		nil, // PromptBuilder not needed with RealContextBuilder
 		contextBuilder,
 		runtimeManager,
 		memory,

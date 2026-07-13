@@ -72,27 +72,27 @@ func (t *SearchFileName) Schema() any {
 func (t *SearchFileName) Execute(ctx context.Context, input any) (*tools.ToolResult, error) {
 	// Parse input
 	var parsed SearchFileNameInput
-	if err := ParseInput(input, &parsed); err != nil {
+	if err := tools.ParseInput(input, &parsed); err != nil {
 		return nil, err
 	}
 
 	// Validate path and pattern
 	if parsed.Path == "" {
-		return BuildToolResult(false, "Path cannot be empty", nil), nil
+		return tools.BuildToolResult(false, "Path cannot be empty", nil), nil
 	}
 	if parsed.Pattern == "" {
-		return BuildToolResult(false, "Pattern cannot be empty", nil), nil
+		return tools.BuildToolResult(false, "Pattern cannot be empty", nil), nil
 	}
 
 	// Validate and resolve path
-	absPath, err := ValidateAndResolvePath(parsed.Path)
+	absPath, err := tools.ValidateAndResolvePath(parsed.Path)
 	if err != nil {
-		return BuildToolResult(false, "Failed to resolve absolute path: "+err.Error(), nil), nil
+		return tools.BuildToolResult(false, "Failed to resolve absolute path: "+err.Error(), nil), nil
 	}
 
 	// Check if path exists
-	if _, err := PathExists(absPath); err != nil {
-		return BuildToolResult(false, "Path does not exist", nil), nil
+	if _, err := tools.PathExists(absPath); err != nil {
+		return tools.BuildToolResult(false, "Path does not exist", nil), nil
 	}
 
 	// Set default max depth if not specified
@@ -130,7 +130,7 @@ func (t *SearchFileName) Execute(ctx context.Context, input any) (*tools.ToolRes
 		baseName := filepath.Base(path)
 
 		// Skip hidden files
-		if IsHidden(baseName) {
+		if tools.IsHidden(baseName) {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}
@@ -172,12 +172,12 @@ func (t *SearchFileName) Execute(ctx context.Context, input any) (*tools.ToolRes
 	}
 
 	// Convert output to map for ToolResult
-	dataMap, err := SerializeOutput(output)
+	dataMap, err := tools.SerializeOutput(output)
 	if err != nil {
-		return BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
+		return tools.BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
 	}
 
-	return BuildToolResult(true, "Search completed", dataMap), nil
+	return tools.BuildToolResult(true, "Search completed", dataMap), nil
 }
 
 // matchesPattern checks if a name matches a glob pattern (supports * wildcard)

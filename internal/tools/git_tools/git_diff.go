@@ -59,18 +59,18 @@ func (t *GitDiff) Schema() any {
 func (t *GitDiff) Execute(ctx context.Context, input any) (*tools.ToolResult, error) {
 	// Parse input
 	var parsed GitDiffInput
-	if err := ParseInput(input, &parsed); err != nil {
+	if err := tools.ParseInput(input, &parsed); err != nil {
 		return nil, err
 	}
 
 	// Validate directory
-	if err := ValidateDirectory(parsed.Directory); err != nil {
-		return BuildToolResult(false, "Directory cannot be empty", nil), nil
+	if err := tools.ValidateDirectory(parsed.Directory); err != nil {
+		return tools.BuildToolResult(false, "Directory cannot be empty", nil), nil
 	}
 
 	// Check if directory is a git repository
 	if err := IsGitRepository(parsed.Directory); err != nil {
-		return BuildToolResult(false, "Not a git repository", nil), nil
+		return tools.BuildToolResult(false, "Not a git repository", nil), nil
 	}
 
 	// Build git diff command
@@ -101,10 +101,10 @@ func (t *GitDiff) Execute(ctx context.Context, input any) (*tools.ToolResult, er
 	}
 
 	// Convert output to map for ToolResult
-	dataMap, err := SerializeOutput(outputData)
+	dataMap, err := tools.SerializeOutput(outputData)
 	if err != nil {
-		return BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
+		return tools.BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
 	}
 
-	return BuildToolResult(true, "Git diff retrieved", dataMap), nil
+	return tools.BuildToolResult(true, "Git diff retrieved", dataMap), nil
 }

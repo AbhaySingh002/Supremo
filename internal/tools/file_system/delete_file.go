@@ -49,20 +49,20 @@ func (t *DeleteFile) Schema() any {
 func (t *DeleteFile) Execute(ctx context.Context, input any) (*tools.ToolResult, error) {
 	// Parse input
 	var parsed DeleteFileInput
-	if err := ParseInput(input, &parsed); err != nil {
+	if err := tools.ParseInput(input, &parsed); err != nil {
 		return nil, err
 	}
 
 	// Validate and resolve path
-	absPath, err := ValidateAndResolvePath(parsed.Path)
+	absPath, err := tools.ValidateAndResolvePath(parsed.Path)
 	if err != nil {
-		return BuildToolResult(false, "Path cannot be empty or is invalid", nil), nil
+		return tools.BuildToolResult(false, "Path cannot be empty or is invalid", nil), nil
 	}
 
 	// Check if path exists
-	_, err = PathExists(absPath)
+	_, err = tools.PathExists(absPath)
 	if err != nil {
-		return BuildToolResult(false, "Path does not exist", nil), nil
+		return tools.BuildToolResult(false, "Path does not exist", nil), nil
 	}
 
 	// Delete the file or directory
@@ -87,10 +87,10 @@ func (t *DeleteFile) Execute(ctx context.Context, input any) (*tools.ToolResult,
 	}
 
 	// Convert output to map for ToolResult
-	dataMap, err := SerializeOutput(output)
+	dataMap, err := tools.SerializeOutput(output)
 	if err != nil {
-		return BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
+		return tools.BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
 	}
 
-	return BuildToolResult(true, "Deleted successfully", dataMap), nil
+	return tools.BuildToolResult(true, "Deleted successfully", dataMap), nil
 }

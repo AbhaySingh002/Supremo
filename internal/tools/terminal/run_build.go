@@ -66,13 +66,13 @@ func (t *RunBuild) Schema() any {
 func (t *RunBuild) Execute(ctx context.Context, input any) (*tools.ToolResult, error) {
 	// Parse input
 	var parsed RunBuildInput
-	if err := ParseInput(input, &parsed); err != nil {
+	if err := tools.ParseInput(input, &parsed); err != nil {
 		return nil, err
 	}
 
 	// Validate directory
-	if err := ValidateDirectory(parsed.Directory); err != nil {
-		return BuildToolResult(false, "Directory cannot be empty", nil), nil
+	if err := tools.ValidateDirectory(parsed.Directory); err != nil {
+		return tools.BuildToolResult(false, "Directory cannot be empty", nil), nil
 	}
 
 	// Detect build tool based on project files
@@ -131,7 +131,7 @@ func (t *RunBuild) Execute(ctx context.Context, input any) (*tools.ToolResult, e
 	// Execute command and capture output
 	cmdOutput, err := ExecuteCommandWithOutput(cmdCtx, cmd)
 	if err != nil {
-		return BuildToolResult(false, "Failed to execute command: "+err.Error(), nil), nil
+		return tools.BuildToolResult(false, "Failed to execute command: "+err.Error(), nil), nil
 	}
 
 	exitCode := cmdOutput.ExitCode
@@ -147,9 +147,9 @@ func (t *RunBuild) Execute(ctx context.Context, input any) (*tools.ToolResult, e
 	}
 
 	// Convert output to map for ToolResult
-	dataMap, err := SerializeOutput(output)
+	dataMap, err := tools.SerializeOutput(output)
 	if err != nil {
-		return BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
+		return tools.BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
 	}
 
 	success := exitCode == 0
@@ -160,7 +160,7 @@ func (t *RunBuild) Execute(ctx context.Context, input any) (*tools.ToolResult, e
 		message = "Build failed"
 	}
 
-	return BuildToolResult(success, message, dataMap), nil
+	return tools.BuildToolResult(success, message, dataMap), nil
 }
 
 // detectBuildTool detects the build tool based on project files

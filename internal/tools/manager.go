@@ -28,9 +28,5 @@ func (m *Manager) Execute(
 		return nil, err
 	}
 
-	if err := Validate(tool.Schema(), input); err != nil {
-		return nil, err
-	}
-
 	return tool.Execute(ctx, input)
 }
