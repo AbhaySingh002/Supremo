@@ -9,7 +9,6 @@ git clone <repo-url>
 cd supremo
 make build   # build binary to ./supremo
 make run     # or run directly
-make test    # run tests
 make clean   # remove binary
 ```
 
