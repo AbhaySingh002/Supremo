@@ -7,14 +7,16 @@ import (
 	"path/filepath"
 
 	"github.com/AbhaySingh002/supremo/internal/storage"
+	"github.com/AbhaySingh002/supremo/internal/tools"
 )
 
 // Session holds the persistent state and context of a user chat session.
 type Session struct {
-	ID            string `json:"id"`
-	CurrentPlanID string `json:"current_plan_id,omitempty"`
-	PlanMode      bool   `json:"plan_mode,omitempty"`
-	DryRun        bool   `json:"dry_run,omitempty"`
+	ID            string             `json:"id"`
+	CurrentPlanID string             `json:"current_plan_id,omitempty"`
+	PlanMode      bool               `json:"plan_mode,omitempty"`
+	DryRun        bool               `json:"dry_run,omitempty"`
+	ApprovalMode  tools.ApprovalMode `json:"approval_mode,omitempty"`
 }
 
 // LoadOrCreateSession restores a session checkpoint or creates an empty one.

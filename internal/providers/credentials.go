@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/AbhaySingh002/supremo/internal/storage"
@@ -12,7 +13,13 @@ import (
 
 const (
 	credentialsFileName = "credentials.json"
+	defaultGeminiAPIKey = "YOUR_GEMINI_API_KEY"
 )
+
+func credentialConfigured(apiKey string) bool {
+	apiKey = strings.TrimSpace(apiKey)
+	return apiKey != "" && apiKey != defaultGeminiAPIKey
+}
 
 // Credentials represents the persisted API key structure.
 type Credentials struct {
@@ -73,7 +80,7 @@ func (s *FileCredentialStore) load() (*Credentials, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			defaultCreds := &Credentials{
 				APIKeys: map[string]string{
-					"gemini": "YOUR_GEMINI_API_KEY",
+					"gemini": defaultGeminiAPIKey,
 				},
 			}
 			// Write the default file to disk

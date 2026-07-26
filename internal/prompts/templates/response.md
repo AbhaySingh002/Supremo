@@ -13,6 +13,7 @@
 ## Style & Structure
 * **Concise & Direct**: Keep responses short, direct, and factual. Avoid conversational filler.
 * **Explain Changes**: Inside `<final_answer>`, summarize exactly which files were changed and why.
+* **Keep Tool Data Collapsed**: Do not paste command stdout, file listings, JSON, or raw tool output into `<final_answer>`; give a concise human summary instead.
 * **No Code Dumps**: Do not output large blocks of code. Let tool executions speak for themselves.
 
 ## Error Reporting & Questions

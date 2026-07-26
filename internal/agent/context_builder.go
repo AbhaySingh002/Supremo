@@ -40,7 +40,7 @@ func NewRealContextBuilder(registry *tools.Registry, memory Memory, contextLimit
 }
 
 // Build implements agent.ContextBuilder.
-func (cb *RealContextBuilder) Build(ctx context.Context, session *Session, _ string, _ *State) (*models.Prompt, error) {
+func (cb *RealContextBuilder) Build(ctx context.Context, session *Session) (*models.Prompt, error) {
 	promptBudget := maxPromptTokenBudget
 	if cb.contextLimit != nil && cb.contextLimit() > 0 && cb.contextLimit() < maxPromptTokenBudget {
 		// Keep room for the model's response instead of filling its whole advertised context.

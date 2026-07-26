@@ -85,16 +85,6 @@ func (m *Manager) Initialize(ctx context.Context) error {
 	return nil
 }
 
-func (m *Manager) CurrentProvider() Provider {
-	m.mu.RLock()
-	runtime := m.runtimeConfig
-	m.mu.RUnlock()
-	if runtime == nil {
-		return nil
-	}
-	return runtime.GetClient()
-}
-
 func (m *Manager) Chat(ctx context.Context, prompt *models.Prompt) (*Completion, error) {
 	m.mu.RLock()
 	runtime := m.runtimeConfig
@@ -103,6 +93,28 @@ func (m *Manager) Chat(ctx context.Context, prompt *models.Prompt) (*Completion,
 		return nil, fmt.Errorf("active provider client not initialized (API key may be missing)")
 	}
 	completion, err := runtime.GetClient().Chat(ctx, prompt)
+	if err != nil {
+		return nil, err
+	}
+	if completion != nil {
+		runtime.addUsage(completion.Usage)
+	}
+	return completion, nil
+}
+
+// Stream forwards incremental text when the active provider supports it, otherwise Chat.
+func (m *Manager) Stream(ctx context.Context, prompt *models.Prompt, receive func(string)) (*Completion, error) {
+	m.mu.RLock()
+	runtime := m.runtimeConfig
+	m.mu.RUnlock()
+	if runtime == nil || runtime.GetClient() == nil {
+		return nil, fmt.Errorf("active provider client not initialized (API key may be missing)")
+	}
+	streamer, ok := runtime.GetClient().(StreamProvider)
+	if !ok {
+		return m.Chat(ctx, prompt)
+	}
+	completion, err := streamer.Stream(ctx, prompt, receive)
 	if err != nil {
 		return nil, err
 	}

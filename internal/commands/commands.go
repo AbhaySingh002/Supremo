@@ -12,6 +12,7 @@ import (
 
 	"github.com/AbhaySingh002/supremo/internal/agent"
 	"github.com/AbhaySingh002/supremo/internal/app"
+	"github.com/AbhaySingh002/supremo/internal/providers"
 	"github.com/AbhaySingh002/supremo/internal/tools"
 )
 
@@ -28,15 +29,7 @@ type Command struct {
 // Registry holds the list of registered commands.
 type Registry struct {
 	commands map[string]Command
-	cancel   func() bool
-	resume   func() error
 }
-
-// SetCancel connects /cancel to the interactive shell's active task.
-func (r *Registry) SetCancel(cancel func() bool) { r.cancel = cancel }
-
-// SetResume connects /plan resume to the interactive shell.
-func (r *Registry) SetResume(resume func() error) { r.resume = resume }
 
 // NewRegistry constructs a Registry and registers all standard commands.
 func NewRegistry() *Registry {
@@ -81,6 +74,7 @@ func NewRegistry() *Registry {
 			session.CurrentPlanID = ""
 			session.PlanMode = false
 			session.DryRun = false
+			session.ApprovalMode = tools.ApprovalStrict
 			if err := session.Save("."); err != nil {
 				return "", err
 			}
@@ -121,6 +115,7 @@ func NewRegistry() *Registry {
 				session.CurrentPlanID = ""
 				session.PlanMode = false
 				session.DryRun = false
+				session.ApprovalMode = tools.ApprovalStrict
 			}
 			return "Supremo workspace state removed. Global configuration and credentials were kept.", nil
 		},
@@ -151,10 +146,7 @@ func NewRegistry() *Registry {
 					if plan == nil {
 						return "", fmt.Errorf("no active plan")
 					}
-					if r.resume == nil {
-						return "", fmt.Errorf("plan resume is unavailable")
-					}
-					return "", r.resume()
+					return "", fmt.Errorf("plan resume must be run through the interactive TUI")
 				}
 			}
 			if len(args) != 0 {
@@ -214,7 +206,34 @@ func NewRegistry() *Registry {
 		},
 	})
 
-	// 10. /cancel
+	// 10. /strict
+	r.Register(Command{
+		Name:        "/strict",
+		Description: "Ask before every tool runs",
+		Execute: func(_ context.Context, _ *app.App, session *agent.Session, args []string) (string, error) {
+			return setApprovalMode(session, tools.ApprovalStrict, args)
+		},
+	})
+
+	// 11. /batman
+	r.Register(Command{
+		Name:        "/batman",
+		Description: "Approve normal work; ask for risky changes",
+		Execute: func(_ context.Context, _ *app.App, session *agent.Session, args []string) (string, error) {
+			return setApprovalMode(session, tools.ApprovalBatman, args)
+		},
+	})
+
+	// 12. /superman
+	r.Register(Command{
+		Name:        "/superman",
+		Description: "Approve every tool automatically",
+		Execute: func(_ context.Context, _ *app.App, session *agent.Session, args []string) (string, error) {
+			return setApprovalMode(session, tools.ApprovalSuperman, args)
+		},
+	})
+
+	// 13. /cancel
 	r.Register(Command{
 		Name:        "/cancel",
 		Description: "Cancel the active task",
@@ -222,18 +241,15 @@ func NewRegistry() *Registry {
 			if len(args) != 0 {
 				return "", fmt.Errorf("usage: /cancel")
 			}
-			if r.cancel == nil || !r.cancel() {
-				return "No active task.", nil
-			}
-			return "Cancellation requested.", nil
+			return "No active task.", nil
 		},
 	})
 
-	// 11. /tools
+	// 14. /tools
 	r.Register(Command{
 		Name:        "/tools",
 		Description: "List tools and their approval policy",
-		Execute: func(_ context.Context, application *app.App, _ *agent.Session, args []string) (string, error) {
+		Execute: func(_ context.Context, application *app.App, session *agent.Session, args []string) (string, error) {
 			if len(args) != 0 {
 				return "", fmt.Errorf("usage: /tools")
 			}
@@ -243,7 +259,11 @@ func NewRegistry() *Registry {
 			registered := application.Registry.All()
 			sort.Slice(registered, func(i, j int) bool { return registered[i].Name() < registered[j].Name() })
 			var output strings.Builder
-			output.WriteString("Tools:\n")
+			mode := tools.ApprovalStrict
+			if session != nil {
+				mode = tools.NormalizeApprovalMode(session.ApprovalMode)
+			}
+			output.WriteString("Tools (" + string(mode) + " mode):\n")
 			for _, tool := range registered {
 				policy := "read-only"
 				if tools.RequiresApproval(tool.Name()) {
@@ -255,7 +275,7 @@ func NewRegistry() *Registry {
 		},
 	})
 
-	// 12. /activity
+	// 15. /activity
 	r.Register(Command{
 		Name:        "/activity",
 		Description: "Show recent local tool activity",
@@ -283,7 +303,7 @@ func NewRegistry() *Registry {
 		},
 	})
 
-	// 13. /doctor
+	// 16. /doctor
 	r.Register(Command{
 		Name:        "/doctor",
 		Description: "Check local setup without calling the provider",
@@ -295,7 +315,7 @@ func NewRegistry() *Registry {
 		},
 	})
 
-	// 14. /exit
+	// 17. /exit
 	r.Register(Command{
 		Name:        "/exit",
 		Description: "Exit the application",
@@ -304,10 +324,10 @@ func NewRegistry() *Registry {
 		},
 	})
 
-	// 15. /auth
+	// 18. /auth
 	r.Register(Command{
 		Name:        "/auth",
-		Description: "Update API key",
+		Description: "Update and verify the active provider API key",
 		Execute: func(ctx context.Context, app *app.App, session *agent.Session, args []string) (string, error) {
 			if len(args) == 0 {
 				return "", fmt.Errorf("usage: /auth <api_key>")
@@ -316,17 +336,14 @@ func NewRegistry() *Registry {
 			if err := app.ProviderManager.UpdateAPIKey(ctx, apiKey); err != nil {
 				return "", err
 			}
-			if len(app.ProviderManager.GetRuntimeConfig().Metadata().Models) > 0 {
-				return "API key updated. Cached provider metadata retained; run /models refresh to update it.", nil
-			}
 			if err := app.ProviderManager.RefreshMetadata(ctx); err != nil {
-				return fmt.Sprintf("API key updated. Metadata was not refreshed: %v", err), nil
+				return "API key saved, but verification failed. Check the key and run /auth <api_key> again.", nil
 			}
-			return "API key updated and provider metadata cached.", nil
+			return "API key saved and verified.", nil
 		},
 	})
 
-	// 16. /provider
+	// 19. /provider
 	r.Register(Command{
 		Name:        "/provider",
 		Description: "Switch provider; name a compatible endpoint with /provider openai-compatible:name <url>",
@@ -347,7 +364,7 @@ func NewRegistry() *Registry {
 		},
 	})
 
-	// 17. /endpoint
+	// 20. /endpoint
 	r.Register(Command{
 		Name:        "/endpoint",
 		Description: "Set the active provider endpoint",
@@ -362,7 +379,7 @@ func NewRegistry() *Registry {
 		},
 	})
 
-	// 18. /models
+	// 21. /models
 	r.Register(Command{
 		Name:        "/models",
 		Description: "List cached models; pass refresh to fetch them again",
@@ -392,7 +409,7 @@ func NewRegistry() *Registry {
 		},
 	})
 
-	// 19. /usage
+	// 22. /usage
 	r.Register(Command{
 		Name:        "/usage",
 		Description: "Show runtime usage and cached account credits; pass refresh to update metadata",
@@ -425,7 +442,7 @@ func NewRegistry() *Registry {
 		},
 	})
 
-	// 20. /model
+	// 23. /model
 	r.Register(Command{
 		Name:        "/model",
 		Description: "Change model (e.g. gemini-2.5-flash)",
@@ -440,7 +457,7 @@ func NewRegistry() *Registry {
 		},
 	})
 
-	// 21. /config
+	// 24. /config
 	r.Register(Command{
 		Name:        "/config",
 		Description: "View or reload configuration",
@@ -449,11 +466,9 @@ func NewRegistry() *Registry {
 				if err := app.ProviderManager.Initialize(ctx); err != nil {
 					return "", err
 				}
-				providerName, model, endpoint, _, _ := app.ProviderManager.GetRuntimeConfig().Get()
-				return fmt.Sprintf("Configuration reloaded successfully.\nActive Configuration:\n  Provider: %s\n  Model:    %s\n  Endpoint: %s", providerName, model, endpoint), nil
+				return "Configuration reloaded successfully.\n" + configurationSummary(app.ProviderManager.GetRuntimeConfig()), nil
 			}
-			providerName, model, endpoint, _, _ := app.ProviderManager.GetRuntimeConfig().Get()
-			return fmt.Sprintf("Active Configuration:\n  Provider: %s\n  Model:    %s\n  Endpoint: %s", providerName, model, endpoint), nil
+			return configurationSummary(app.ProviderManager.GetRuntimeConfig()), nil
 		},
 	})
 
@@ -467,14 +482,33 @@ func (r *Registry) Register(cmd Command) {
 
 // List returns all registered commands sorted by name.
 func (r *Registry) List() []Command {
-	names := []string{"/help", "/init", "/clear", "/reset", "/krypton", "/plan", "/approve", "/deny", "/dry-run", "/cancel", "/tools", "/activity", "/doctor", "/auth", "/provider", "/endpoint", "/models", "/usage", "/model", "/config", "/exit"}
-	var list []Command
-	for _, name := range names {
-		if cmd, ok := r.commands[name]; ok {
-			list = append(list, cmd)
-		}
+	list := make([]Command, 0, len(r.commands))
+	for _, cmd := range r.commands {
+		list = append(list, cmd)
 	}
+	sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
 	return list
+}
+
+func setApprovalMode(session *agent.Session, mode tools.ApprovalMode, args []string) (string, error) {
+	if session == nil {
+		return "", fmt.Errorf("session is unavailable")
+	}
+	if len(args) > 1 || len(args) == 1 && args[0] != "mode" {
+		return "", fmt.Errorf("usage: /%s [mode]", mode)
+	}
+	session.ApprovalMode = mode
+	if err := session.Save("."); err != nil {
+		return "", err
+	}
+	switch mode {
+	case tools.ApprovalBatman:
+		return "Batman mode enabled — normal work runs; destructive, dependency, and risky commands ask first.", nil
+	case tools.ApprovalSuperman:
+		return "Superman mode enabled — every tool is approved automatically.", nil
+	default:
+		return "Strict mode enabled — every tool asks first.", nil
+	}
 }
 
 func doctor(application *app.App) (string, error) {
@@ -509,8 +543,9 @@ func doctor(application *app.App) (string, error) {
 	if application == nil || application.ProviderManager == nil || application.ProviderManager.GetRuntimeConfig() == nil {
 		output.WriteString("- Provider: unavailable\n")
 	} else {
-		provider, model, _, apiKey, client := application.ProviderManager.GetRuntimeConfig().Get()
-		if apiKey == "" || apiKey == "YOUR_GEMINI_API_KEY" || client == nil {
+		runtime := application.ProviderManager.GetRuntimeConfig()
+		provider, model, _, _, client := runtime.Get()
+		if !runtime.CredentialConfigured() || client == nil {
 			fmt.Fprintf(&output, "- Provider: %s / %s needs an API key\n", provider, model)
 		} else {
 			fmt.Fprintf(&output, "- Provider: %s / %s configured\n", provider, model)
@@ -523,6 +558,15 @@ func doctor(application *app.App) (string, error) {
 	}
 	output.WriteString("- Provider network access: not checked\n")
 	return output.String(), nil
+}
+
+func configurationSummary(runtime *providers.RuntimeConfig) string {
+	providerName, model, endpoint, _, _ := runtime.Get()
+	credential := "needs setup"
+	if runtime.CredentialConfigured() {
+		credential = "configured"
+	}
+	return fmt.Sprintf("Active Configuration:\n  Provider:   %s\n  Model:      %s\n  Endpoint:   %s\n  Credential: %s", providerName, model, endpoint, credential)
 }
 
 // Handle processes the user input. If it is a command (starts with '/'), it executes it

@@ -28,17 +28,18 @@ func (a *Agent) runPlanMode(ctx context.Context, session *Session, userInput str
 		return "", fmt.Errorf("append user message: %w", err)
 	}
 
-	a.report("Planning…")
+	a.emit(ProgressEvent{Kind: ProgressPhase, Phase: "planning", Message: "Planning…"})
 	// Keep the previous checkpoint active until a replacement has validated and saved.
 	plannerSession := *session
 	plannerSession.CurrentPlanID = ""
-	plan, err := a.plan(ctx, &plannerSession, userInput)
+	plan, err := a.plan(ctx, &plannerSession)
 	if err != nil {
 		return "", err
 	}
 	if err := session.SetPlan(a.workspace, plan); err != nil {
 		return "", err
 	}
+	a.emit(ProgressEvent{Kind: ProgressPlan, Phase: "planning", Plan: clonePlan(plan)})
 	if err := a.build(ctx, session, plan, nil); err != nil {
 		return "", err
 	}
@@ -57,7 +58,8 @@ func (a *Agent) ResumePlan(ctx context.Context, session *Session) (string, error
 	if plan == nil {
 		return "", fmt.Errorf("no active plan")
 	}
-	a.report("Resuming plan " + plan.ID + "…")
+	a.emit(ProgressEvent{Kind: ProgressPlan, Phase: "build", Plan: clonePlan(plan)})
+	a.emit(ProgressEvent{Kind: ProgressPhase, Phase: "build", Message: "Resuming plan " + plan.ID + "…"})
 	if err := a.build(ctx, session, plan, nil); err != nil {
 		return "", err
 	}
@@ -65,7 +67,7 @@ func (a *Agent) ResumePlan(ctx context.Context, session *Session) (string, error
 }
 
 func (a *Agent) finishPlan(ctx context.Context, session *Session, plan *Plan) (string, error) {
-	a.report("Auditing…")
+	a.emit(ProgressEvent{Kind: ProgressPhase, Phase: "audit", Message: "Auditing…"})
 	verdict, err := a.audit(ctx, session)
 	if err != nil {
 		return "", err
@@ -78,7 +80,7 @@ func (a *Agent) finishPlan(ctx context.Context, session *Session, plan *Plan) (s
 		if err := a.build(ctx, session, plan, retry); err != nil {
 			return "", err
 		}
-		a.report("Auditing retry…")
+		a.emit(ProgressEvent{Kind: ProgressPhase, Phase: "audit", Message: "Auditing retry…"})
 		verdict, err = a.audit(ctx, session)
 		if err != nil {
 			return "", err
@@ -86,13 +88,15 @@ func (a *Agent) finishPlan(ctx context.Context, session *Session, plan *Plan) (s
 	}
 
 	if verdict.Approved {
+		a.emit(ProgressEvent{Kind: ProgressCompletion, Phase: "completion", Message: verdict.Reason})
 		return fmt.Sprintf("Plan %s approved: %s", plan.ID, verdict.Reason), nil
 	}
+	a.emit(ProgressEvent{Kind: ProgressCompletion, Phase: "completion", Message: verdict.Reason})
 	return fmt.Sprintf("Plan %s needs attention: %s", plan.ID, verdict.Reason), nil
 }
 
-func (a *Agent) plan(ctx context.Context, session *Session, userInput string) (*Plan, error) {
-	prompt, err := a.contextBuilder.Build(ctx, session, userInput, &State{MaxIterations: 1})
+func (a *Agent) plan(ctx context.Context, session *Session) (*Plan, error) {
+	prompt, err := a.contextBuilder.Build(ctx, session)
 	if err != nil {
 		return nil, fmt.Errorf("build planner context: %w", err)
 	}
@@ -120,6 +124,7 @@ func (a *Agent) plan(ctx context.Context, session *Session, userInput string) (*
 }
 
 func (a *Agent) build(ctx context.Context, session *Session, plan *Plan, retry map[string]bool) error {
+	a.emit(ProgressEvent{Kind: ProgressPhase, Phase: "build", Message: "Building…"})
 	for i := range plan.Steps {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -134,8 +139,7 @@ func (a *Agent) build(ctx context.Context, session *Session, plan *Plan, retry m
 		if err := a.persistStep(session, plan, step.ID, StepInProgress, ""); err != nil {
 			return err
 		}
-		a.report("Step " + step.ID + ": " + step.Description)
-
+		a.emit(ProgressEvent{Kind: ProgressPlanStep, Phase: "build", StepID: step.ID, Plan: clonePlan(plan)})
 		result, err := a.toolManager.Execute(ctx, step.Tool, step.Arguments)
 		observation := NewObservation(step.Tool, result, err)
 		status := StepCompleted
@@ -145,10 +149,10 @@ func (a *Agent) build(ctx context.Context, session *Session, plan *Plan, retry m
 		if err := a.persistStep(session, plan, step.ID, status, truncateTokens(observation.Output, 250)); err != nil {
 			return err
 		}
+		a.emit(ProgressEvent{Kind: ProgressPlanStep, Phase: "build", StepID: step.ID, Plan: clonePlan(plan)})
 		if err := a.memory.Append(ctx, session.ID, models.Message{Role: models.RoleTool, Content: observation.Output}); err != nil {
 			return err
 		}
-		a.report("Step " + step.ID + ": " + status)
 		if status == StepFailed {
 			return nil
 		}
@@ -157,7 +161,7 @@ func (a *Agent) build(ctx context.Context, session *Session, plan *Plan, retry m
 }
 
 func (a *Agent) audit(ctx context.Context, session *Session) (*auditVerdict, error) {
-	prompt, err := a.contextBuilder.Build(ctx, session, "", &State{MaxIterations: 1})
+	prompt, err := a.contextBuilder.Build(ctx, session)
 	if err != nil {
 		return nil, fmt.Errorf("build auditor context: %w", err)
 	}

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/AbhaySingh002/supremo/internal/storage"
@@ -54,11 +53,4 @@ func findModel(models []ModelInfo, id string) (ModelInfo, bool) {
 		}
 	}
 	return ModelInfo{}, false
-}
-
-func parsePrice(value string) (float64, error) {
-	if value == "" {
-		return 0, nil
-	}
-	return strconv.ParseFloat(value, 64)
 }

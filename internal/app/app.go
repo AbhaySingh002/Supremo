@@ -29,8 +29,7 @@ type App struct {
 func New() (*App, error) {
 	ctx := context.Background()
 
-	// 1. Load/Create configuration using Provider Manager
-	fmt.Println("Initializing Provider...")
+	// 1. Load/Create configuration using Provider Manager.
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("find user home directory: %w", err)
@@ -44,8 +43,7 @@ func New() (*App, error) {
 		return nil, fmt.Errorf("failed to initialize provider manager: %w", err)
 	}
 
-	// 2. Create Tool Registry
-	fmt.Println("Initializing Tools...")
+	// 2. Create Tool Registry.
 	registry := tools.NewRegistry()
 
 	// 3. Register every existing tool
@@ -88,14 +86,12 @@ func New() (*App, error) {
 	memory := agent.NewInMemoryMemory()
 
 	// 7. Load the fixed prompt templates once.
-	fmt.Println("Initializing Prompt System...")
 	contextBuilder, err := agent.NewRealContextBuilder(registry, memory, providerManager.ContextLimit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load prompts: %w", err)
 	}
 
 	// 8. Get the active provider & construct the Agent.
-	fmt.Println("Initializing Agent...")
 	appAgent := agent.NewAgent(
 		providerManager,
 		toolManager,
@@ -103,8 +99,6 @@ func New() (*App, error) {
 		contextBuilder,
 		memory,
 	)
-
-	fmt.Println("Ready.")
 
 	return &App{
 		Agent:           appAgent,

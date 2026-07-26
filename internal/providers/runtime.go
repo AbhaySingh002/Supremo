@@ -39,6 +39,13 @@ func (r *RuntimeConfig) GetClient() Provider {
 	return r.activeClient
 }
 
+// CredentialConfigured reports whether the active provider has a non-placeholder API key.
+func (r *RuntimeConfig) CredentialConfigured() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return credentialConfigured(r.apiKey)
+}
+
 // Metadata returns the cached provider capabilities and account information.
 func (r *RuntimeConfig) Metadata() Metadata {
 	r.mu.RLock()

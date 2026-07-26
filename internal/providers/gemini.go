@@ -39,6 +39,60 @@ func NewGeminiProvider(ctx context.Context, apiKey, model, endpoint string) (*Ge
 
 // Chat sends prompt turns to Gemini models.
 func (p *GeminiProvider) Chat(ctx context.Context, prompt *models.Prompt) (*Completion, error) {
+	contents, config := geminiRequest(prompt, p.model)
+	resp, err := p.client.Models.GenerateContent(ctx, p.model, contents, config)
+	if err != nil {
+		return nil, fmt.Errorf("gemini execution error: %w", err)
+	}
+
+	finishReason := ""
+	if len(resp.Candidates) > 0 {
+		finishReason = string(resp.Candidates[0].FinishReason)
+	}
+
+	// Read parts directly so private thought parts cannot enter the response.
+	text, extractErr := safeExtractText(resp)
+	if extractErr != nil {
+		return nil, fmt.Errorf("gemini returned empty response (finish_reason=%s): %w", finishReason, extractErr)
+	}
+
+	return &Completion{
+		Raw:          text,
+		FinishReason: finishReason,
+	}, nil
+}
+
+// Stream sends incremental Gemini text to receive and returns the complete response.
+func (p *GeminiProvider) Stream(ctx context.Context, prompt *models.Prompt, receive func(string)) (*Completion, error) {
+	contents, config := geminiRequest(prompt, p.model)
+	var text strings.Builder
+	finishReason := ""
+	for response, err := range p.client.Models.GenerateContentStream(ctx, p.model, contents, config) {
+		if err != nil {
+			return nil, fmt.Errorf("gemini streaming execution error: %w", err)
+		}
+		if response == nil {
+			continue
+		}
+		if len(response.Candidates) > 0 {
+			finishReason = string(response.Candidates[0].FinishReason)
+		}
+		chunk := streamText(response)
+		if chunk == "" {
+			continue
+		}
+		text.WriteString(chunk)
+		if receive != nil {
+			receive(chunk)
+		}
+	}
+	if text.Len() == 0 {
+		return nil, fmt.Errorf("gemini stream returned empty response (finish_reason=%s)", finishReason)
+	}
+	return &Completion{Raw: text.String(), FinishReason: finishReason}, nil
+}
+
+func geminiRequest(prompt *models.Prompt, model string) ([]*genai.Content, *genai.GenerateContentConfig) {
 	var contents []*genai.Content
 
 	for _, msg := range prompt.Messages {
@@ -52,36 +106,47 @@ func (p *GeminiProvider) Chat(ctx context.Context, prompt *models.Prompt) (*Comp
 		})
 	}
 
-	var config *genai.GenerateContentConfig
+	config := &genai.GenerateContentConfig{ThinkingConfig: geminiThinkingConfig(model)}
 	if prompt.System != "" {
-		config = &genai.GenerateContentConfig{
-			SystemInstruction: &genai.Content{
-				Parts: []*genai.Part{{Text: prompt.System}},
-			},
+		config.SystemInstruction = &genai.Content{
+			Parts: []*genai.Part{{Text: prompt.System}},
 		}
 	}
-
-	resp, err := p.client.Models.GenerateContent(ctx, p.model, contents, config)
-	if err != nil {
-		return nil, fmt.Errorf("gemini execution error: %w", err)
+	if config.SystemInstruction == nil && config.ThinkingConfig == nil {
+		config = nil
 	}
 
-	finishReason := ""
-	if len(resp.Candidates) > 0 {
-		finishReason = string(resp.Candidates[0].FinishReason)
-	}
+	return contents, config
+}
 
-	// ponytail: resp.Text() panics when candidates have no text parts.
-	// Recover and return a proper error instead of crashing the process.
-	text, extractErr := safeExtractText(resp)
-	if extractErr != nil {
-		return nil, fmt.Errorf("gemini returned empty response (finish_reason=%s): %w", finishReason, extractErr)
+// geminiThinkingConfig enables native reasoning only for Gemini families that
+// advertise it. Thoughts remain server-side and are filtered from responses.
+func geminiThinkingConfig(model string) *genai.ThinkingConfig {
+	model = strings.ToLower(strings.TrimSpace(model))
+	switch {
+	case strings.HasPrefix(model, "gemini-3"):
+		return &genai.ThinkingConfig{ThinkingLevel: genai.ThinkingLevelMedium}
+	case strings.HasPrefix(model, "gemini-2.5"):
+		budget := int32(1024)
+		return &genai.ThinkingConfig{ThinkingBudget: &budget}
+	default:
+		return nil
 	}
+}
 
-	return &Completion{
-		Raw:          text,
-		FinishReason: finishReason,
-	}, nil
+func streamText(response *genai.GenerateContentResponse) string {
+	var text strings.Builder
+	for _, candidate := range response.Candidates {
+		if candidate == nil || candidate.Content == nil {
+			continue
+		}
+		for _, part := range candidate.Content.Parts {
+			if part != nil && !part.Thought {
+				text.WriteString(part.Text)
+			}
+		}
+	}
+	return text.String()
 }
 
 // FetchMetadata lists Gemini models and their advertised input context limits.
@@ -100,14 +165,12 @@ func (p *GeminiProvider) FetchMetadata(ctx context.Context) (Metadata, error) {
 	return metadata, nil
 }
 
-// safeExtractText calls resp.Text() with panic recovery.
+// safeExtractText returns only the response text, never the model's private thoughts.
 func safeExtractText(resp *genai.GenerateContentResponse) (text string, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("%v", r)
-		}
-	}()
-	text = resp.Text()
+	if resp == nil {
+		return "", fmt.Errorf("model returned no response")
+	}
+	text = streamText(resp)
 	if text == "" {
 		return "", fmt.Errorf("model returned empty text")
 	}

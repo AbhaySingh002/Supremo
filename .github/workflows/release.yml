@@ -15,6 +15,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Verify release version
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: test "$(cat VERSION)" = "$VERSION" || { echo "VERSION must match the release tag before tagging." >&2; exit 1; }
       - name: Build archives
         env:
           VERSION: ${{ github.ref_name }}
@@ -36,15 +40,3 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ github.ref_name }}
         run: gh release create "$VERSION" dist/* --generate-notes
-      - name: Update latest version
-        env:
-          VERSION: ${{ github.ref_name }}
-        run: |
-          git fetch origin main
-          git checkout -B main origin/main
-          printf '%s\n' "$VERSION" > VERSION
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add VERSION
-          git diff --cached --quiet || git commit -m "chore: update VERSION to $VERSION"
-          git push origin HEAD:main

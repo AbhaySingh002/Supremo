@@ -100,10 +100,6 @@ func (p *OpenAIProvider) FetchMetadata(ctx context.Context) (Metadata, error) {
 		ID            string `json:"id"`
 		Name          string `json:"name"`
 		ContextLength int    `json:"context_length"`
-		Pricing       struct {
-			Prompt     string `json:"prompt"`
-			Completion string `json:"completion"`
-		} `json:"pricing"`
 	}
 	var response struct {
 		Data []model `json:"data"`
@@ -113,13 +109,11 @@ func (p *OpenAIProvider) FetchMetadata(ctx context.Context) (Metadata, error) {
 	}
 	metadata := Metadata{Models: make([]ModelInfo, 0, len(response.Data)), FetchedAt: time.Now().UTC()}
 	for _, item := range response.Data {
-		input, _ := parsePrice(item.Pricing.Prompt)
-		output, _ := parsePrice(item.Pricing.Completion)
 		name := item.Name
 		if name == "" {
 			name = item.ID
 		}
-		metadata.Models = append(metadata.Models, ModelInfo{ID: item.ID, Name: name, ContextLength: item.ContextLength, InputCostPerToken: input, OutputCostPerToken: output})
+		metadata.Models = append(metadata.Models, ModelInfo{ID: item.ID, Name: name, ContextLength: item.ContextLength})
 	}
 	if p.openRouter {
 		var credits struct {

@@ -3,25 +3,30 @@ package commands
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/AbhaySingh002/supremo/internal/agent"
+	"github.com/AbhaySingh002/supremo/internal/app"
+	"github.com/AbhaySingh002/supremo/internal/providers"
+	"github.com/AbhaySingh002/supremo/internal/tools"
 )
 
 func TestCommands_Registry(t *testing.T) {
 	r := NewRegistry()
 	list := r.List()
-	if len(list) != 21 {
-		t.Fatalf("expected 21 commands, got %d", len(list))
+	if len(list) != 24 {
+		t.Fatalf("expected 24 commands, got %d", len(list))
 	}
 
-	expectedNames := []string{"/help", "/init", "/clear", "/reset", "/krypton", "/plan", "/approve", "/deny", "/dry-run", "/cancel", "/tools", "/activity", "/doctor", "/auth", "/provider", "/endpoint", "/models", "/usage", "/model", "/config", "/exit"}
-	for i, cmd := range list {
-		if cmd.Name != expectedNames[i] {
-			t.Errorf("expected command %d to be %s, got %s", i, expectedNames[i], cmd.Name)
+	expectedNames := []string{"/activity", "/approve", "/auth", "/batman", "/cancel", "/clear", "/config", "/deny", "/doctor", "/dry-run", "/endpoint", "/exit", "/help", "/init", "/krypton", "/model", "/models", "/plan", "/provider", "/reset", "/strict", "/superman", "/tools", "/usage"}
+	for i, command := range list {
+		if command.Name != expectedNames[i] {
+			t.Fatalf("command %d = %q, want %q", i, command.Name, expectedNames[i])
 		}
 	}
 }
@@ -107,13 +112,36 @@ func TestCommands_DryRunPersists(t *testing.T) {
 	}
 }
 
-func TestCommands_CancelUsesShellCallback(t *testing.T) {
-	called := false
-	registry := NewRegistry()
-	registry.SetCancel(func() bool { called = true; return true })
-	output, handled, err := registry.Handle(context.Background(), nil, &agent.Session{}, "/cancel")
-	if err != nil || !handled || !called || output != "Cancellation requested." {
-		t.Fatalf("unexpected cancellation: output=%q handled=%v called=%v err=%v", output, handled, called, err)
+func TestCommands_ApprovalModesPersist(t *testing.T) {
+	root := t.TempDir()
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previous) })
+
+	session := &agent.Session{ID: "test"}
+	for _, input := range []string{"/strict mode", "/batman mode", "/superman"} {
+		if _, handled, err := NewRegistry().Handle(context.Background(), nil, session, input); err != nil || !handled {
+			t.Fatalf("%s: handled=%v err=%v", input, handled, err)
+		}
+	}
+	if session.ApprovalMode != tools.ApprovalSuperman {
+		t.Fatalf("approval mode = %q", session.ApprovalMode)
+	}
+	restored, err := agent.LoadOrCreateSession(".", "test")
+	if err != nil || restored.ApprovalMode != tools.ApprovalSuperman {
+		t.Fatalf("expected persisted superman mode: session=%#v err=%v", restored, err)
+	}
+}
+
+func TestCommands_CancelWithoutInteractiveTask(t *testing.T) {
+	output, handled, err := NewRegistry().Handle(context.Background(), nil, &agent.Session{}, "/cancel")
+	if err != nil || !handled || output != "No active task." {
+		t.Fatalf("unexpected cancellation: output=%q handled=%v err=%v", output, handled, err)
 	}
 }
 
@@ -137,6 +165,27 @@ func TestCommands_PlanStatusAndShow(t *testing.T) {
 		if err != nil || !handled || !strings.Contains(output, "Saved task") {
 			t.Fatalf("unexpected %s result: output=%q handled=%v err=%v", input, output, handled, err)
 		}
+	}
+}
+
+func TestCommands_PlanResumeRequiresInteractiveTUI(t *testing.T) {
+	root := t.TempDir()
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previous) })
+
+	session := &agent.Session{ID: "test"}
+	if err := session.SetPlan(".", &agent.Plan{ID: "saved", Description: "Saved task", Steps: []agent.Step{{ID: "one", Description: "pending", Status: agent.StepPending}}}); err != nil {
+		t.Fatal(err)
+	}
+	_, handled, err := NewRegistry().Handle(context.Background(), nil, session, "/plan resume")
+	if !handled || err == nil || !strings.Contains(err.Error(), "interactive TUI") {
+		t.Fatalf("plan resume should require the TUI: handled=%v err=%v", handled, err)
 	}
 }
 
@@ -201,5 +250,52 @@ func TestCommands_Exit(t *testing.T) {
 	}
 	if !errors.Is(err, ErrExit) {
 		t.Errorf("expected ErrExit, got %v", err)
+	}
+}
+
+func TestCommands_AuthSavesAndVerifiesKey(t *testing.T) {
+	verified := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") == "Bearer rejected-key" {
+			http.Error(w, "invalid key", http.StatusUnauthorized)
+			return
+		}
+		verified = r.Header.Get("Authorization") == "Bearer replacement-key"
+		_, _ = w.Write([]byte(`{"data":[{"id":"test-model"}]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	dir := t.TempDir()
+	if err := providers.SaveConfig(dir, &providers.Config{ProviderName: "openai", Model: "test-model", Endpoint: server.URL}); err != nil {
+		t.Fatal(err)
+	}
+	store := providers.NewFileCredentialStore(dir)
+	if err := store.SetAPIKey("openai", "old-key"); err != nil {
+		t.Fatal(err)
+	}
+	manager := providers.NewManager(dir, store)
+	if err := manager.Initialize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	output, handled, err := NewRegistry().Handle(context.Background(), &app.App{ProviderManager: manager}, &agent.Session{}, "/auth replacement-key")
+	if err != nil || !handled || output != "API key saved and verified." {
+		t.Fatalf("unexpected auth result: output=%q handled=%v err=%v", output, handled, err)
+	}
+	if !verified || !manager.GetRuntimeConfig().CredentialConfigured() {
+		t.Fatal("updated key was not verified through the active provider")
+	}
+
+	output, handled, err = NewRegistry().Handle(context.Background(), &app.App{ProviderManager: manager}, &agent.Session{}, "/auth rejected-key")
+	if err != nil || !handled || !strings.Contains(output, "verification failed") {
+		t.Fatalf("unexpected rejected-key result: output=%q handled=%v err=%v", output, handled, err)
+	}
+	_, _, _, apiKey, _ := manager.GetRuntimeConfig().Get()
+	if apiKey != "rejected-key" {
+		t.Fatalf("rejected key should remain saved for recovery, got %q", apiKey)
 	}
 }

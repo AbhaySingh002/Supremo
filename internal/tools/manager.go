@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -12,12 +13,12 @@ type Manager struct {
 	registry *Registry
 	mu       sync.Mutex
 	pending  *approvalRequest
-	report   func(string)
+	report   func(Event)
 	activity []Activity
 }
 
-// SetReporter emits compact execution status for interactive clients.
-func (m *Manager) SetReporter(report func(string)) { m.report = report }
+// SetReporter emits execution lifecycle events for interactive clients.
+func (m *Manager) SetReporter(report func(Event)) { m.report = report }
 
 // Approve releases the one pending mutating tool call.
 func (m *Manager) Approve() bool { return m.resolveApproval(nil) }
@@ -66,19 +67,20 @@ func (m *Manager) Execute(
 		return nil, err
 	}
 
-	if RequiresApproval(name) {
-		if IsDryRun(ctx) {
-			result := BuildToolResult(true, "Dry run: would execute "+renderToolCall(name, input), nil)
-			m.record(name, "dry run", result.Message)
-			return result, nil
-		}
-		m.record(name, "waiting approval", "")
+	if IsDryRun(ctx) && RequiresApproval(name) {
+		result := BuildToolResult(true, "Dry run: would execute "+renderToolCall(name, input), nil)
+		m.record(name, "dry run", result.Message, renderToolCall(name, input), "")
+		return result, nil
+	}
+	if RequiresApprovalFor(ctx, name, input) {
 		if err := m.waitForApproval(ctx, name, input); err != nil {
-			m.record(name, "denied", err.Error())
+			m.record(name, "denied", err.Error(), renderToolCall(name, input), "")
 			return nil, err
 		}
-		m.record(name, "approved", "")
+		m.record(name, "approved", "", renderToolCall(name, input), "")
 	}
+	arguments := renderToolCall(name, input)
+	m.recordEvent(Event{Time: time.Now().UTC(), Tool: name, Status: "running", Arguments: arguments})
 	result, err := tool.Execute(ctx, input)
 	status := "completed"
 	message := ""
@@ -91,23 +93,20 @@ func (m *Manager) Execute(
 			message = err.Error()
 		}
 	}
-	m.record(name, status, message)
+	m.record(name, status, message, arguments, toolOutputPreview(result))
 	return result, err
 }
 
 func (m *Manager) waitForApproval(ctx context.Context, name string, input any) error {
-	request := &approvalRequest{decision: make(chan error, 1)}
+	request := &approvalRequest{decision: make(chan error, 1), tool: name, arguments: renderToolCall(name, input)}
 	m.mu.Lock()
 	if m.pending != nil {
 		m.mu.Unlock()
 		return fmt.Errorf("another tool call is already awaiting approval")
 	}
 	m.pending = request
-	report := m.report
 	m.mu.Unlock()
-	if report != nil {
-		report("Approval required: " + renderToolCall(name, input) + " (use /approve or /deny)")
-	}
+	m.recordEvent(Event{Time: time.Now().UTC(), Tool: name, Status: "waiting approval", Arguments: request.arguments, Message: "Approval required"})
 	select {
 	case err := <-request.decision:
 		return err
@@ -136,11 +135,34 @@ func (m *Manager) Recent() []Activity {
 	return activity
 }
 
-func (m *Manager) record(name, status, message string) {
+func (m *Manager) record(name, status, message, arguments, output string) {
+	m.recordEvent(Event{Time: time.Now().UTC(), Tool: name, Status: status, Message: message, Arguments: arguments, Output: output})
+}
+
+func toolOutputPreview(result *ToolResult) string {
+	if result == nil || len(result.Data) == 0 {
+		return ""
+	}
+	data, err := json.MarshalIndent(result.Data, "", "  ")
+	if err != nil {
+		return ""
+	}
+	const limit = 12_000
+	if len(data) > limit {
+		return string(data[:limit]) + "\n… output truncated"
+	}
+	return string(data)
+}
+
+func (m *Manager) recordEvent(event Event) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.activity = append(m.activity, Activity{Time: time.Now().UTC(), Tool: name, Status: status, Message: message})
+	m.activity = append(m.activity, Activity{Time: event.Time, Tool: event.Tool, Status: event.Status, Message: event.Message})
 	if len(m.activity) > 50 {
 		m.activity = m.activity[len(m.activity)-50:]
+	}
+	report := m.report
+	m.mu.Unlock()
+	if report != nil {
+		report(event)
 	}
 }

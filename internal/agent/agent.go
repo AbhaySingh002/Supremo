@@ -18,12 +18,7 @@ type Parser interface {
 
 // ContextBuilder defines the interface for constructing conversation context.
 type ContextBuilder interface {
-	Build(
-		ctx context.Context,
-		session *Session,
-		userInput string,
-		state *State,
-	) (*models.Prompt, error)
+	Build(ctx context.Context, session *Session) (*models.Prompt, error)
 }
 
 // Memory defines the interface for managing and appending conversation history.
@@ -44,19 +39,13 @@ type Agent struct {
 	memory         Memory
 	workspace      string
 	debug          bool
-	progress       func(string)
+	progress       func(ProgressEvent)
 }
 
-// SetProgress installs the CLI's small status reporter.
-func (a *Agent) SetProgress(report func(string)) {
+// SetProgress installs an interactive lifecycle reporter.
+func (a *Agent) SetProgress(report func(ProgressEvent)) {
 	a.progress = report
-	a.toolManager.SetReporter(report)
-}
-
-func (a *Agent) report(message string) {
-	if a.progress != nil {
-		a.progress(message)
-	}
+	a.toolManager.SetReporter(a.reportTool)
 }
 
 // ApprovePendingTool releases one mutating tool call waiting for confirmation.
@@ -69,6 +58,9 @@ func (a *Agent) taskContext(ctx context.Context, session *Session) (context.Cont
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	ctx = tools.WithWorkspace(ctx, a.workspace)
 	ctx = tools.WithDryRun(ctx, session.DryRun)
+	if session.ApprovalMode != "" {
+		ctx = tools.WithApprovalMode(ctx, session.ApprovalMode)
+	}
 	return tools.WithToolBudget(ctx, 20), cancel
 }
 
@@ -101,6 +93,9 @@ func (a *Agent) SetDebug(enabled bool) {
 	a.debug = enabled
 }
 
+// Debug reports whether diagnostic lifecycle entries are enabled.
+func (a *Agent) Debug() bool { return a.debug }
+
 // executeAll runs all tool calls in a parsed response sequentially, stopping on first error.
 func (a *Agent) executeAll(ctx context.Context, resp *parser.Response) ([]Observation, error) {
 	if resp == nil || len(resp.ToolCalls) == 0 {
@@ -109,16 +104,9 @@ func (a *Agent) executeAll(ctx context.Context, resp *parser.Response) ([]Observ
 
 	var observations []Observation
 	for _, tc := range resp.ToolCalls {
-		a.report("Running " + tc.Name + "…")
 		res, err := a.toolManager.Execute(ctx, tc.Name, tc.Arguments)
 		obs := NewObservation(tc.Name, res, err)
 		observations = append(observations, obs)
-		if obs.Success {
-			a.report(tc.Name + ": completed")
-		} else {
-			a.report(tc.Name + ": failed")
-		}
-
 		if err != nil || !obs.Success {
 			break
 		}

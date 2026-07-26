@@ -19,6 +19,19 @@ type scriptedProvider struct {
 	calls     int
 }
 
+type streamedProvider struct{ chunks []string }
+
+func (p *streamedProvider) Chat(context.Context, *models.Prompt) (*providers.Completion, error) {
+	return nil, fmt.Errorf("Chat should not be used when streaming is available")
+}
+
+func (p *streamedProvider) Stream(_ context.Context, _ *models.Prompt, receive func(string)) (*providers.Completion, error) {
+	for _, chunk := range p.chunks {
+		receive(chunk)
+	}
+	return &providers.Completion{Raw: strings.Join(p.chunks, "")}, nil
+}
+
 func (p *scriptedProvider) Chat(context.Context, *models.Prompt) (*providers.Completion, error) {
 	if p.calls == len(p.responses) {
 		return nil, fmt.Errorf("unexpected provider call")
@@ -30,7 +43,7 @@ func (p *scriptedProvider) Chat(context.Context, *models.Prompt) (*providers.Com
 
 type testContextBuilder struct{}
 
-func (testContextBuilder) Build(context.Context, *Session, string, *State) (*models.Prompt, error) {
+func (testContextBuilder) Build(context.Context, *Session) (*models.Prompt, error) {
 	return &models.Prompt{System: "test system"}, nil
 }
 
@@ -75,6 +88,8 @@ func TestPlanModeBuildAndApprove(t *testing.T) {
 	}}
 	tool := &testTool{}
 	agent := newPlanAgent(root, provider, tool)
+	var events []ProgressEvent
+	agent.SetProgress(func(event ProgressEvent) { events = append(events, event) })
 	session := &Session{ID: "session", PlanMode: true}
 
 	output, err := agent.Run(context.Background(), session, "do the task")
@@ -85,9 +100,67 @@ func TestPlanModeBuildAndApprove(t *testing.T) {
 	if err != nil || plan == nil || plan.Steps[0].Status != StepCompleted {
 		t.Fatalf("expected persisted completed plan: %#v, %v", plan, err)
 	}
+	seenPlan, seenBuild, seenCompletion := false, false, false
+	for _, event := range events {
+		seenPlan = seenPlan || event.Kind == ProgressPlan
+		seenBuild = seenBuild || event.Kind == ProgressPlanStep
+		seenCompletion = seenCompletion || event.Kind == ProgressCompletion
+	}
+	if !seenPlan || !seenBuild || !seenCompletion {
+		t.Fatalf("missing lifecycle events: plan=%t build=%t completion=%t", seenPlan, seenBuild, seenCompletion)
+	}
 	progress, err := os.ReadFile(filepath.Join(root, ".memory", "progress.md"))
 	if err != nil || !strings.Contains(string(progress), "recorded tool output") {
 		t.Fatalf("expected progress entry: %v", err)
+	}
+}
+
+func TestAgentStreamsVisibleFinalAnswer(t *testing.T) {
+	root := t.TempDir()
+	registry := tools.NewRegistry()
+	worker := &Agent{
+		provider:       &streamedProvider{chunks: []string{"<final_answer>Fin", "ished</final_answer>"}},
+		toolManager:    tools.NewManager(registry),
+		parser:         parser.NewParser(),
+		contextBuilder: testContextBuilder{},
+		memory:         newInMemoryMemory(root),
+		workspace:      root,
+	}
+	var events []ProgressEvent
+	worker.SetProgress(func(event ProgressEvent) { events = append(events, event) })
+
+	output, err := worker.Run(context.Background(), &Session{ID: "stream"}, "finish")
+	if err != nil || output != "Finished" {
+		t.Fatalf("streamed run: output=%q err=%v", output, err)
+	}
+	seen := false
+	for _, event := range events {
+		seen = seen || event.Kind == ProgressStream && event.Message == "Finished"
+	}
+	if !seen {
+		t.Fatalf("missing final stream event: %#v", events)
+	}
+}
+
+func TestAgentDoesNotStreamReActThoughts(t *testing.T) {
+	root := t.TempDir()
+	worker := &Agent{
+		provider:       &streamedProvider{chunks: []string{"private reasoning", "<final_answer>Done</final_answer>"}},
+		toolManager:    tools.NewManager(tools.NewRegistry()),
+		parser:         parser.NewParser(),
+		contextBuilder: testContextBuilder{},
+		memory:         newInMemoryMemory(root),
+		workspace:      root,
+	}
+	var events []ProgressEvent
+	worker.SetProgress(func(event ProgressEvent) { events = append(events, event) })
+	if output, err := worker.Run(context.Background(), &Session{ID: "private-thought"}, "finish"); err != nil || output != "Done" {
+		t.Fatalf("run = %q, %v", output, err)
+	}
+	for _, event := range events {
+		if event.Kind == ProgressStream && strings.Contains(event.Message, "private reasoning") {
+			t.Fatalf("thought leaked to progress stream: %#v", event)
+		}
 	}
 }
 

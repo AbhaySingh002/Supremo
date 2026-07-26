@@ -23,11 +23,9 @@ type Usage struct {
 
 // ModelInfo is the provider metadata needed to choose and size a model at runtime.
 type ModelInfo struct {
-	ID                 string  `json:"id"`
-	Name               string  `json:"name"`
-	ContextLength      int     `json:"context_length,omitempty"`
-	InputCostPerToken  float64 `json:"input_cost_per_token,omitempty"`
-	OutputCostPerToken float64 `json:"output_cost_per_token,omitempty"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	ContextLength int    `json:"context_length,omitempty"`
 }
 
 // AccountInfo is intentionally optional: not every provider exposes a balance to a normal API key.
@@ -46,6 +44,12 @@ type Metadata struct {
 // Provider defines the interface that all LLM adapters must implement.
 type Provider interface {
 	Chat(ctx context.Context, prompt *models.Prompt) (*Completion, error)
+}
+
+// StreamProvider is implemented by providers that can emit response text before completion.
+// The callback receives ordered text deltas; callers must not retain provider state in it.
+type StreamProvider interface {
+	Stream(ctx context.Context, prompt *models.Prompt, receive func(string)) (*Completion, error)
 }
 
 // MetadataProvider is implemented when a provider can list its available models.
