@@ -3,6 +3,8 @@ package providers
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/AbhaySingh002/supremo/internal/models"
 	"google.golang.org/genai"
@@ -19,6 +21,9 @@ func NewGeminiProvider(ctx context.Context, apiKey, model, endpoint string) (*Ge
 	cfg := &genai.ClientConfig{
 		APIKey:  apiKey,
 		Backend: genai.BackendGeminiAPI,
+	}
+	if endpoint != "" {
+		cfg.HTTPOptions.BaseURL = endpoint
 	}
 
 	client, err := genai.NewClient(ctx, cfg)
@@ -77,6 +82,22 @@ func (p *GeminiProvider) Chat(ctx context.Context, prompt *models.Prompt) (*Comp
 		Raw:          text,
 		FinishReason: finishReason,
 	}, nil
+}
+
+// FetchMetadata lists Gemini models and their advertised input context limits.
+func (p *GeminiProvider) FetchMetadata(ctx context.Context) (Metadata, error) {
+	metadata := Metadata{FetchedAt: time.Now().UTC()}
+	for model, err := range p.client.Models.All(ctx) {
+		if err != nil {
+			return Metadata{}, fmt.Errorf("list Gemini models: %w", err)
+		}
+		if model == nil {
+			continue
+		}
+		id := strings.TrimPrefix(model.Name, "models/")
+		metadata.Models = append(metadata.Models, ModelInfo{ID: id, Name: model.DisplayName, ContextLength: int(model.InputTokenLimit)})
+	}
+	return metadata, nil
 }
 
 // safeExtractText calls resp.Text() with panic recovery.

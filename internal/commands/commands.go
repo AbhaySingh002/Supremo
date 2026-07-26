@@ -316,11 +316,116 @@ func NewRegistry() *Registry {
 			if err := app.ProviderManager.UpdateAPIKey(ctx, apiKey); err != nil {
 				return "", err
 			}
-			return "API key updated successfully.", nil
+			if len(app.ProviderManager.GetRuntimeConfig().Metadata().Models) > 0 {
+				return "API key updated. Cached provider metadata retained; run /models refresh to update it.", nil
+			}
+			if err := app.ProviderManager.RefreshMetadata(ctx); err != nil {
+				return fmt.Sprintf("API key updated. Metadata was not refreshed: %v", err), nil
+			}
+			return "API key updated and provider metadata cached.", nil
 		},
 	})
 
-	// 16. /model
+	// 16. /provider
+	r.Register(Command{
+		Name:        "/provider",
+		Description: "Switch provider; name a compatible endpoint with /provider openai-compatible:name <url>",
+		Execute: func(ctx context.Context, app *app.App, session *agent.Session, args []string) (string, error) {
+			if len(args) < 1 || len(args) > 2 {
+				return "", fmt.Errorf("usage: /provider <gemini|openai|anthropic|openrouter|openai-compatible[:name]> [endpoint]")
+			}
+			var err error
+			if len(args) == 2 {
+				err = app.ProviderManager.UpdateProviderEndpoint(ctx, args[0], args[1])
+			} else {
+				err = app.ProviderManager.UpdateProvider(ctx, args[0])
+			}
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("Provider updated to %s.", args[0]), nil
+		},
+	})
+
+	// 17. /endpoint
+	r.Register(Command{
+		Name:        "/endpoint",
+		Description: "Set the active provider endpoint",
+		Execute: func(ctx context.Context, app *app.App, session *agent.Session, args []string) (string, error) {
+			if len(args) != 1 {
+				return "", fmt.Errorf("usage: /endpoint <url>")
+			}
+			if err := app.ProviderManager.UpdateEndpoint(ctx, args[0]); err != nil {
+				return "", err
+			}
+			return "Endpoint updated.", nil
+		},
+	})
+
+	// 18. /models
+	r.Register(Command{
+		Name:        "/models",
+		Description: "List cached models; pass refresh to fetch them again",
+		Execute: func(ctx context.Context, app *app.App, session *agent.Session, args []string) (string, error) {
+			if len(args) > 1 || (len(args) == 1 && args[0] != "refresh") {
+				return "", fmt.Errorf("usage: /models [refresh]")
+			}
+			if len(args) == 1 {
+				if err := app.ProviderManager.RefreshMetadata(ctx); err != nil {
+					return "", err
+				}
+			}
+			metadata := app.ProviderManager.GetRuntimeConfig().Metadata()
+			if len(metadata.Models) == 0 {
+				return "No cached models. Run /models refresh after setting an API key.", nil
+			}
+			var output strings.Builder
+			fmt.Fprintf(&output, "Cached models (%d):\n", len(metadata.Models))
+			for _, model := range metadata.Models {
+				fmt.Fprintf(&output, "- %s", model.ID)
+				if model.ContextLength > 0 {
+					fmt.Fprintf(&output, " (context %d)", model.ContextLength)
+				}
+				output.WriteByte('\n')
+			}
+			return output.String(), nil
+		},
+	})
+
+	// 19. /usage
+	r.Register(Command{
+		Name:        "/usage",
+		Description: "Show runtime usage and cached account credits; pass refresh to update metadata",
+		Execute: func(ctx context.Context, app *app.App, session *agent.Session, args []string) (string, error) {
+			if len(args) > 1 || (len(args) == 1 && args[0] != "refresh") {
+				return "", fmt.Errorf("usage: /usage [refresh]")
+			}
+			if len(args) == 1 {
+				if err := app.ProviderManager.RefreshMetadata(ctx); err != nil {
+					return "", err
+				}
+			}
+			runtime := app.ProviderManager.GetRuntimeConfig()
+			usage, metadata := runtime.Usage(), runtime.Metadata()
+			var output strings.Builder
+			fmt.Fprintf(&output, "Runtime usage: input %d, output %d", usage.InputTokens, usage.OutputTokens)
+			if usage.CostUSD != nil {
+				fmt.Fprintf(&output, ", cost $%.6f", *usage.CostUSD)
+			}
+			output.WriteByte('\n')
+			if metadata.Account == nil {
+				output.WriteString("Account credits: unavailable for this key/provider.\n")
+			} else {
+				fmt.Fprintf(&output, "Account credits: $%.6f remaining ($%.6f total, $%.6f used)\n", metadata.Account.TotalCredits-metadata.Account.TotalUsage, metadata.Account.TotalCredits, metadata.Account.TotalUsage)
+			}
+			if limit := runtime.ContextLimit(); limit > 0 {
+				fmt.Fprintf(&output, "Selected model context: %d tokens\n", limit)
+			}
+			return output.String(), nil
+		},
+	})
+
+	// 20. /model
 	r.Register(Command{
 		Name:        "/model",
 		Description: "Change model (e.g. gemini-2.5-flash)",
@@ -335,7 +440,7 @@ func NewRegistry() *Registry {
 		},
 	})
 
-	// 17. /config
+	// 21. /config
 	r.Register(Command{
 		Name:        "/config",
 		Description: "View or reload configuration",
@@ -362,7 +467,7 @@ func (r *Registry) Register(cmd Command) {
 
 // List returns all registered commands sorted by name.
 func (r *Registry) List() []Command {
-	names := []string{"/help", "/init", "/clear", "/reset", "/krypton", "/plan", "/approve", "/deny", "/dry-run", "/cancel", "/tools", "/activity", "/doctor", "/auth", "/model", "/config", "/exit"}
+	names := []string{"/help", "/init", "/clear", "/reset", "/krypton", "/plan", "/approve", "/deny", "/dry-run", "/cancel", "/tools", "/activity", "/doctor", "/auth", "/provider", "/endpoint", "/models", "/usage", "/model", "/config", "/exit"}
 	var list []Command
 	for _, name := range names {
 		if cmd, ok := r.commands[name]; ok {

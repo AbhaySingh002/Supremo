@@ -14,11 +14,11 @@ import (
 func TestCommands_Registry(t *testing.T) {
 	r := NewRegistry()
 	list := r.List()
-	if len(list) != 17 {
-		t.Fatalf("expected 17 commands, got %d", len(list))
+	if len(list) != 21 {
+		t.Fatalf("expected 21 commands, got %d", len(list))
 	}
 
-	expectedNames := []string{"/help", "/init", "/clear", "/reset", "/krypton", "/plan", "/approve", "/deny", "/dry-run", "/cancel", "/tools", "/activity", "/doctor", "/auth", "/model", "/config", "/exit"}
+	expectedNames := []string{"/help", "/init", "/clear", "/reset", "/krypton", "/plan", "/approve", "/deny", "/dry-run", "/cancel", "/tools", "/activity", "/doctor", "/auth", "/provider", "/endpoint", "/models", "/usage", "/model", "/config", "/exit"}
 	for i, cmd := range list {
 		if cmd.Name != expectedNames[i] {
 			t.Errorf("expected command %d to be %s, got %s", i, expectedNames[i], cmd.Name)

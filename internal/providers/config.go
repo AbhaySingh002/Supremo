@@ -15,9 +15,28 @@ const (
 
 // Config represents the persisted YAML configuration for Supremo.
 type Config struct {
-	ProviderName string `yaml:"provider_name"`
-	Model        string `yaml:"model"`
-	Endpoint     string `yaml:"endpoint"`
+	ProviderName string            `yaml:"provider_name"`
+	Model        string            `yaml:"model"`
+	Endpoint     string            `yaml:"endpoint"`
+	Models       map[string]string `yaml:"models,omitempty"`
+	Endpoints    map[string]string `yaml:"endpoints,omitempty"`
+}
+
+func (c *Config) normalize() {
+	if c.Models == nil {
+		c.Models = make(map[string]string)
+	}
+	if c.Endpoints == nil {
+		c.Endpoints = make(map[string]string)
+	}
+	if _, exists := c.Models[c.ProviderName]; !exists {
+		c.Models[c.ProviderName] = c.Model
+	}
+	if _, exists := c.Endpoints[c.ProviderName]; !exists {
+		c.Endpoints[c.ProviderName] = c.Endpoint
+	}
+	c.Model = c.Models[c.ProviderName]
+	c.Endpoint = c.Endpoints[c.ProviderName]
 }
 
 // EnsureConfigDir creates the config directory path if it does not exist.
@@ -48,11 +67,13 @@ func LoadConfig(dir string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
+	cfg.normalize()
 	return &cfg, nil
 }
 
 // SaveConfig writes the active configuration to config.yaml.
 func SaveConfig(dir string, cfg *Config) error {
+	cfg.normalize()
 	path := filepath.Join(dir, configFileName)
 	data, err := yaml.Marshal(cfg)
 	if err != nil {

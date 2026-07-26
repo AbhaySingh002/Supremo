@@ -70,3 +70,41 @@ func TestManagerRollbackOnProviderFailure(t *testing.T) {
 		t.Errorf("expected persisted provider rollback to gemini, got %q", cfg.ProviderName)
 	}
 }
+
+func TestManagerKeepsEndpointAndModelPerProvider(t *testing.T) {
+	dir := t.TempDir()
+	credentials := NewFileCredentialStore(dir)
+	if err := credentials.SetAPIKey("gemini", "gemini-key"); err != nil {
+		t.Fatal(err)
+	}
+	if err := credentials.SetAPIKey("openai", "openai-key"); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(dir, credentials)
+	if err := manager.Initialize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.UpdateEndpoint(context.Background(), "https://gemini.example/"); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.UpdateProviderEndpoint(context.Background(), "openai", "https://openai.example/v1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.UpdateModel(context.Background(), "openai-model"); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.UpdateProvider(context.Background(), "gemini"); err != nil {
+		t.Fatal(err)
+	}
+	provider, model, endpoint, _, _ := manager.GetRuntimeConfig().Get()
+	if provider != "gemini" || model != "gemini-2.5-flash" || endpoint != "https://gemini.example/" {
+		t.Fatalf("gemini config was not restored: provider=%q model=%q endpoint=%q", provider, model, endpoint)
+	}
+	if err := manager.UpdateProviderEndpoint(context.Background(), "openai-compatible:local", "http://localhost:11434/v1"); err != nil {
+		t.Fatal(err)
+	}
+	provider, _, endpoint, _, _ = manager.GetRuntimeConfig().Get()
+	if provider != "openai-compatible:local" || endpoint != "http://localhost:11434/v1" {
+		t.Fatalf("named compatible provider was not stored: provider=%q endpoint=%q", provider, endpoint)
+	}
+}

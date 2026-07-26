@@ -1,6 +1,6 @@
 # Supremo
 
-Supremo is a local Go coding agent. It uses Gemini, keeps its working state in the current repository, and asks before tools modify files or run arbitrary commands.
+Supremo is a local Go coding agent. It supports Gemini, OpenAI, Anthropic, OpenRouter, and OpenAI-compatible endpoints, keeps its working state in the current repository, and asks before tools modify files or run arbitrary commands.
 
 ## Install
 
@@ -58,17 +58,21 @@ supremo
 | `/plan` | Toggle planned, checkpointed tool execution. |
 | `/plan status`, `/plan show`, `/plan resume` | Inspect or resume the active plan. |
 | `/approve`, `/deny`, `/dry-run`, `/cancel` | Control a running task. |
-| `/auth`, `/model`, `/config` | Configure Gemini. |
+| `/auth`, `/provider`, `/endpoint`, `/model`, `/models`, `/usage`, `/config` | Configure and inspect the active provider. |
 | `/clear`, `/reset`, `/krypton` | Clear conversation, state, or workspace traces. |
 
 `run_build` and `run_tests` execute repository code automatically. File-changing tools, formatters, and `execute_command` require approval. `execute_command` is an approved escape hatch and is not sandboxed.
 
 ## Local state and privacy
 
-- Credentials and provider configuration stay in `~/.supremo/`.
+- Credentials, provider configuration, and cached provider metadata stay in `~/.supremo/`.
 - Workspace memory, plans, checkpoints, and large tool-output scratch files stay in `.memory/`, `.session/`, and `.scratchpad/` in the current repository.
 - `/krypton` removes only those workspace files; it keeps `~/.supremo/`.
-- Prompts, selected workspace memory, tool observations, and configured web fetches are sent to the configured Gemini provider when a task runs. Supremo has no built-in telemetry.
+- Prompts, selected workspace memory, tool observations, and configured web fetches are sent to the configured model provider when a task runs. Supremo has no built-in telemetry.
+
+Use `/provider openai`, `/provider anthropic`, or `/provider openrouter`, then `/auth <key>` and `/models` to choose a model. Add a future OpenAI-compatible server at runtime with a named route such as `/provider openai-compatible:ollama http://localhost:11434/v1`; its endpoint, model, key, and cache stay separate from other routes. Model and account metadata is cached locally and only refreshed by `/models refresh` or `/usage refresh`.
+
+OpenRouter management keys can report account credits. OpenAI's costs API requires an organization admin key and reports spend, not remaining balance; Anthropic does not expose a normal key-level balance endpoint. Supremo always reports the token usage it receives from each completion, and reports a provider balance only when the key is allowed to retrieve one.
 
 See [the privacy and state guide](docs/privacy.md) for details.
 

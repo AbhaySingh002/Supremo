@@ -13,27 +13,21 @@ import (
 )
 
 const (
-	promptTokenBudget         = 20_000
-	systemStateBudget         = promptTokenBudget * 30 / 100
-	messageWindowBudget       = promptTokenBudget * 50 / 100
-	toolBufferBudget          = promptTokenBudget * 20 / 100
-	workspaceMemoryBudget     = systemStateBudget / 4
-	conversationSummaryBudget = systemStateBudget / 6
-	activePlanBudget          = systemStateBudget / 12
-	projectInstructionsBudget = systemStateBudget / 6
-	systemInstructionsBudget  = systemStateBudget - workspaceMemoryBudget - conversationSummaryBudget - activePlanBudget - projectInstructionsBudget
+	maxPromptTokenBudget = 20_000
+	minPromptTokenBudget = 1_024
 )
 
 // RealContextBuilder builds prompts from the startup-loaded system instructions.
 type RealContextBuilder struct {
-	system    string
-	workspace string
-	memory    Memory
-	project   string
+	system       string
+	workspace    string
+	memory       Memory
+	project      string
+	contextLimit func() int
 }
 
 // NewRealContextBuilder creates a new RealContextBuilder.
-func NewRealContextBuilder(registry *tools.Registry, memory Memory) (*RealContextBuilder, error) {
+func NewRealContextBuilder(registry *tools.Registry, memory Memory, contextLimit func() int) (*RealContextBuilder, error) {
 	system, err := prompts.LoadSystem(registry)
 	if err != nil {
 		return nil, err
@@ -42,11 +36,24 @@ func NewRealContextBuilder(registry *tools.Registry, memory Memory) (*RealContex
 	if err != nil {
 		return nil, err
 	}
-	return &RealContextBuilder{system: system, workspace: workspace, memory: memory, project: loadProjectInstructions(workspace)}, nil
+	return &RealContextBuilder{system: system, workspace: workspace, memory: memory, project: loadProjectInstructions(workspace), contextLimit: contextLimit}, nil
 }
 
 // Build implements agent.ContextBuilder.
 func (cb *RealContextBuilder) Build(ctx context.Context, session *Session, _ string, _ *State) (*models.Prompt, error) {
+	promptBudget := maxPromptTokenBudget
+	if cb.contextLimit != nil && cb.contextLimit() > 0 && cb.contextLimit() < maxPromptTokenBudget {
+		// Keep room for the model's response instead of filling its whole advertised context.
+		promptBudget = max(minPromptTokenBudget, cb.contextLimit()*3/4)
+	}
+	systemStateBudget := promptBudget * 30 / 100
+	messageWindowBudget := promptBudget * 50 / 100
+	toolBufferBudget := promptBudget * 20 / 100
+	workspaceMemoryBudget := systemStateBudget / 4
+	conversationSummaryBudget := systemStateBudget / 6
+	activePlanBudget := systemStateBudget / 12
+	projectInstructionsBudget := systemStateBudget / 6
+	systemInstructionsBudget := systemStateBudget - workspaceMemoryBudget - conversationSummaryBudget - activePlanBudget - projectInstructionsBudget
 	persistent, err := cb.memory.PersistentContext(workspaceMemoryBudget)
 	if err != nil {
 		return nil, err

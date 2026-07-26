@@ -6,6 +6,7 @@ Supremo does not include analytics or telemetry.
 
 - `~/.supremo/config.yaml` stores the selected provider and model.
 - `~/.supremo/credentials.json` stores provider API keys with private file permissions.
+- `~/.supremo/provider-metadata.yaml` stores locally cached model metadata and any account data the provider permits the key to retrieve.
 - `.memory/MEMORY.md` and `.memory/progress.md` store repository knowledge and recent work.
 - `.session/` stores conversation checkpoints and active plans.
 - `.scratchpad/` stores full oversized tool output; prompt history contains only a bounded snippet.
@@ -14,7 +15,7 @@ Supremo does not include analytics or telemetry.
 
 ## What leaves your machine
 
-When a task calls the configured Gemini provider, Supremo sends the system prompt, applicable project instructions (`SUPREMO.md` or `AGENTS.md`), selected workspace memory, conversation context, and tool observations needed for that task. The provider's privacy terms apply to that request.
+When a task calls the configured model provider, Supremo sends the system prompt, applicable project instructions (`SUPREMO.md` or `AGENTS.md`), selected workspace memory, conversation context, and tool observations needed for that task. The provider's privacy terms apply to that request. `/models refresh` and `/usage refresh` make the selected provider's metadata requests using the stored API key.
 
 `web_fetch` makes a direct request to the URL you supply. `run_build` and `run_tests` execute repository code. `execute_command` runs only after approval and is not sandboxed.
 

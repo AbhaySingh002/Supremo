@@ -3,29 +3,60 @@ package providers
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/AbhaySingh002/supremo/internal/models"
 )
 
-// Manager coordinates file configuration, credentials, client initialization, and state.
+// Manager coordinates persisted provider settings, credentials, cached metadata, and the active client.
 type Manager struct {
 	mu            sync.RWMutex
 	configDir     string
 	credStore     *FileCredentialStore
+	config        *Config
 	runtimeConfig *RuntimeConfig
+	metadataCache *metadataCache
 }
 
-// NewManager constructs a new Provider Manager.
 func NewManager(configDir string, credStore *FileCredentialStore) *Manager {
 	return &Manager{configDir: configDir, credStore: credStore}
 }
 
-// Initialize configures files, pulls keys, and sets runtime configs on boot.
+func providerClient(ctx context.Context, providerName, apiKey, model, endpoint string) (Provider, error) {
+	switch providerType(providerName) {
+	case "gemini":
+		return NewGeminiProvider(ctx, apiKey, model, endpoint)
+	case "openai":
+		return NewOpenAIProvider(ctx, apiKey, model, endpoint)
+	case "openrouter":
+		return NewOpenRouterProvider(ctx, apiKey, model, endpoint)
+	case "anthropic":
+		return NewAnthropicProvider(ctx, apiKey, model, endpoint)
+	case "openai-compatible":
+		return NewOpenAICompatibleProvider(ctx, apiKey, model, endpoint)
+	default:
+		return nil, fmt.Errorf("unsupported provider: %s", providerName)
+	}
+}
+
+func providerType(providerName string) string {
+	return strings.SplitN(providerName, ":", 2)[0]
+}
+
+func knownProvider(providerName string) bool {
+	switch providerType(providerName) {
+	case "gemini", "openai", "openrouter", "anthropic", "openai-compatible":
+		return true
+	default:
+		return false
+	}
+}
+
+// Initialize loads the selected provider without making a metadata request.
 func (m *Manager) Initialize(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
 	if err := EnsureConfigDir(m.configDir); err != nil {
 		return fmt.Errorf("failed to configure dir: %w", err)
 	}
@@ -33,22 +64,27 @@ func (m *Manager) Initialize(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to load configs: %w", err)
 	}
-	if cfg.ProviderName != "gemini" {
+	if !knownProvider(cfg.ProviderName) {
 		return fmt.Errorf("unsupported provider: %s", cfg.ProviderName)
 	}
 	apiKey, err := m.credStore.GetAPIKey(cfg.ProviderName)
 	if err != nil {
 		return fmt.Errorf("failed to load API key: %w", err)
 	}
-	client, err := NewGeminiProvider(ctx, apiKey, cfg.Model, cfg.Endpoint)
+	client, err := providerClient(ctx, cfg.ProviderName, apiKey, cfg.Model, cfg.Endpoint)
 	if err != nil {
-		return fmt.Errorf("failed to create Gemini provider: %w", err)
+		return err
 	}
-	m.runtimeConfig = NewRuntimeConfig(cfg.ProviderName, cfg.Model, cfg.Endpoint, apiKey, client)
+	cache, err := loadMetadataCache(m.configDir)
+	if err != nil {
+		return fmt.Errorf("load provider metadata cache: %w", err)
+	}
+	runtime := NewRuntimeConfig(cfg.ProviderName, cfg.Model, cfg.Endpoint, apiKey, client)
+	runtime.setMetadata(cache.Providers[cacheKey(cfg.ProviderName, cfg.Endpoint)])
+	m.config, m.runtimeConfig, m.metadataCache = cfg, runtime, cache
 	return nil
 }
 
-// CurrentProvider returns the active Provider client.
 func (m *Manager) CurrentProvider() Provider {
 	m.mu.RLock()
 	runtime := m.runtimeConfig
@@ -59,91 +95,136 @@ func (m *Manager) CurrentProvider() Provider {
 	return runtime.GetClient()
 }
 
-// Chat satisfies the agent.Provider interface.
 func (m *Manager) Chat(ctx context.Context, prompt *models.Prompt) (*Completion, error) {
-	client := m.CurrentProvider()
-	if client == nil {
+	m.mu.RLock()
+	runtime := m.runtimeConfig
+	m.mu.RUnlock()
+	if runtime == nil || runtime.GetClient() == nil {
 		return nil, fmt.Errorf("active provider client not initialized (API key may be missing)")
 	}
-	return client.Chat(ctx, prompt)
+	completion, err := runtime.GetClient().Chat(ctx, prompt)
+	if err != nil {
+		return nil, err
+	}
+	if completion != nil {
+		runtime.addUsage(completion.Usage)
+	}
+	return completion, nil
 }
 
-// update applies a setting, persists it, and restores both on client creation failure.
 func (m *Manager) update(ctx context.Context, change func(), persist func() error) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.runtimeConfig == nil {
 		return fmt.Errorf("manager not initialized")
 	}
-
-	m.runtimeConfig.mu.Lock()
-	defer m.runtimeConfig.mu.Unlock()
-
-	previousProvider := m.runtimeConfig.providerName
-	previousModel := m.runtimeConfig.model
-	previousEndpoint := m.runtimeConfig.endpoint
-	previousAPIKey := m.runtimeConfig.apiKey
+	runtime := m.runtimeConfig
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	previousProvider, previousModel, previousEndpoint, previousAPIKey := runtime.providerName, runtime.model, runtime.endpoint, runtime.apiKey
 	restore := func() {
-		m.runtimeConfig.providerName = previousProvider
-		m.runtimeConfig.model = previousModel
-		m.runtimeConfig.endpoint = previousEndpoint
-		m.runtimeConfig.apiKey = previousAPIKey
+		runtime.providerName, runtime.model, runtime.endpoint, runtime.apiKey = previousProvider, previousModel, previousEndpoint, previousAPIKey
 	}
-
 	change()
+	client, err := providerClient(ctx, runtime.providerName, runtime.apiKey, runtime.model, runtime.endpoint)
+	if err != nil {
+		restore()
+		return err
+	}
 	if err := persist(); err != nil {
 		restore()
 		return err
 	}
-	client, err := NewGeminiProvider(ctx, m.runtimeConfig.apiKey, m.runtimeConfig.model, m.runtimeConfig.endpoint)
-	if err != nil {
-		restore()
-		if restoreErr := persist(); restoreErr != nil {
-			return fmt.Errorf("failed to rebuild provider client: %w; failed to restore previous configuration: %v", err, restoreErr)
-		}
-		return fmt.Errorf("failed to rebuild provider client: %w", err)
+	runtime.activeClient = client
+	if m.metadataCache != nil {
+		runtime.metadata = m.metadataCache.Providers[cacheKey(runtime.providerName, runtime.endpoint)]
 	}
-	m.runtimeConfig.activeClient = client
 	return nil
 }
 
 func (m *Manager) saveConfig() error {
-	return SaveConfig(m.configDir, &Config{
-		ProviderName: m.runtimeConfig.providerName,
-		Model:        m.runtimeConfig.model,
-		Endpoint:     m.runtimeConfig.endpoint,
-	})
+	m.config.ProviderName = m.runtimeConfig.providerName
+	m.config.Model = m.runtimeConfig.model
+	m.config.Endpoint = m.runtimeConfig.endpoint
+	m.config.Models[m.runtimeConfig.providerName] = m.runtimeConfig.model
+	m.config.Endpoints[m.runtimeConfig.providerName] = m.runtimeConfig.endpoint
+	return SaveConfig(m.configDir, m.config)
 }
 
-// UpdateModel updates model settings.
 func (m *Manager) UpdateModel(ctx context.Context, model string) error {
 	return m.update(ctx, func() { m.runtimeConfig.model = model }, m.saveConfig)
 }
 
-// UpdateEndpoint updates endpoints.
 func (m *Manager) UpdateEndpoint(ctx context.Context, endpoint string) error {
 	return m.update(ctx, func() { m.runtimeConfig.endpoint = endpoint }, m.saveConfig)
 }
 
-// UpdateAPIKey updates provider API key.
 func (m *Manager) UpdateAPIKey(ctx context.Context, apiKey string) error {
 	return m.update(ctx, func() { m.runtimeConfig.apiKey = apiKey }, func() error {
 		return m.credStore.SetAPIKey(m.runtimeConfig.providerName, m.runtimeConfig.apiKey)
 	})
 }
 
-// UpdateProvider switches active provider.
 func (m *Manager) UpdateProvider(ctx context.Context, providerName string) error {
-	if providerName != "gemini" {
-		return fmt.Errorf("unsupported provider: %s", providerName)
-	}
 	return m.update(ctx, func() {
 		m.runtimeConfig.providerName = providerName
+		m.runtimeConfig.model = m.config.Models[providerName]
+		m.runtimeConfig.endpoint = m.config.Endpoints[providerName]
 		m.runtimeConfig.apiKey, _ = m.credStore.GetAPIKey(providerName)
 	}, m.saveConfig)
 }
 
-// GetRuntimeConfig retrieves the active runtime configurations.
+// UpdateProviderEndpoint switches provider and endpoint atomically, for custom compatible servers.
+func (m *Manager) UpdateProviderEndpoint(ctx context.Context, providerName, endpoint string) error {
+	return m.update(ctx, func() {
+		m.runtimeConfig.providerName, m.runtimeConfig.model, m.runtimeConfig.endpoint = providerName, m.config.Models[providerName], endpoint
+		m.runtimeConfig.apiKey, _ = m.credStore.GetAPIKey(providerName)
+	}, m.saveConfig)
+}
+
+// RefreshMetadata fetches models and optional account data once, then persists them locally.
+func (m *Manager) RefreshMetadata(ctx context.Context) error {
+	m.mu.RLock()
+	runtime, cache := m.runtimeConfig, m.metadataCache
+	m.mu.RUnlock()
+	if runtime == nil || cache == nil {
+		return fmt.Errorf("manager not initialized")
+	}
+	providerName, _, endpoint, apiKey, client := runtime.Get()
+	metadataProvider, ok := client.(MetadataProvider)
+	if !ok {
+		return fmt.Errorf("%s does not support model metadata refresh", providerName)
+	}
+	metadata, err := metadataProvider.FetchMetadata(ctx)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if runtime.providerName != providerName || runtime.endpoint != endpoint || runtime.apiKey != apiKey {
+		return fmt.Errorf("provider changed while refreshing metadata")
+	}
+	key := cacheKey(providerName, endpoint)
+	m.metadataCache.Providers[key] = metadata
+	if err := saveMetadataCache(m.configDir, m.metadataCache); err != nil {
+		return err
+	}
+	runtime.metadata = metadata
+	return nil
+}
+
+func (m *Manager) ContextLimit() int {
+	m.mu.RLock()
+	runtime := m.runtimeConfig
+	m.mu.RUnlock()
+	if runtime == nil {
+		return 0
+	}
+	return runtime.ContextLimit()
+}
+
 func (m *Manager) GetRuntimeConfig() *RuntimeConfig {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
