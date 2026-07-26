@@ -26,10 +26,12 @@ type RunFormatterInput struct {
 }
 
 type RunFormatterOutput struct {
-	ExitCode  int    `json:"exit_code"`
-	Stdout    string `json:"stdout"`
-	Stderr    string `json:"stderr"`
-	Formatter string `json:"formatter"`
+	ExitCode        int    `json:"exit_code"`
+	Stdout          string `json:"stdout"`
+	Stderr          string `json:"stderr"`
+	Formatter       string `json:"formatter"`
+	StdoutTruncated bool   `json:"stdout_truncated,omitempty"`
+	StderrTruncated bool   `json:"stderr_truncated,omitempty"`
 }
 
 type RunFormatter struct{}
@@ -72,8 +74,15 @@ func (t *RunFormatter) Execute(ctx context.Context, input any) (*tools.ToolResul
 	}
 
 	// Validate directory
-	if err := tools.ValidateDirectory(parsed.Directory); err != nil {
+	directory, err := tools.ValidateDirectory(ctx, parsed.Directory)
+	if err != nil {
 		return tools.BuildToolResult(false, "Directory cannot be empty", nil), nil
+	}
+	parsed.Directory = directory
+	for _, file := range parsed.Files {
+		if _, err := tools.ValidateAndResolvePath(ctx, file); err != nil {
+			return tools.BuildToolResult(false, "Formatter files must be inside the workspace", nil), nil
+		}
 	}
 
 	// Detect formatter based on project files
@@ -131,15 +140,14 @@ func (t *RunFormatter) Execute(ctx context.Context, input any) (*tools.ToolResul
 	}
 
 	exitCode := cmdOutput.ExitCode
-	stdoutBytes := cmdOutput.Stdout
-	stderrBytes := cmdOutput.Stderr
-
 	// Build output
 	output := RunFormatterOutput{
-		ExitCode:  exitCode,
-		Stdout:    string(stdoutBytes),
-		Stderr:    string(stderrBytes),
-		Formatter: formatter,
+		ExitCode:        exitCode,
+		Stdout:          string(cmdOutput.Stdout),
+		Stderr:          string(cmdOutput.Stderr),
+		Formatter:       formatter,
+		StdoutTruncated: cmdOutput.StdoutTruncated,
+		StderrTruncated: cmdOutput.StderrTruncated,
 	}
 
 	// Convert output to map for ToolResult
@@ -150,8 +158,10 @@ func (t *RunFormatter) Execute(ctx context.Context, input any) (*tools.ToolResul
 
 	success := exitCode == 0
 	message := "Formatting completed"
-	if exitCode == -1 {
+	if cmdOutput.TimedOut {
 		message = "Formatting timed out"
+	} else if cmdOutput.Canceled {
+		message = "Formatting canceled"
 	} else if exitCode != 0 {
 		message = "Formatting failed"
 	}

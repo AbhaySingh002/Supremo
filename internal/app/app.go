@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/AbhaySingh002/supremo/internal/agent"
 	"github.com/AbhaySingh002/supremo/internal/parser"
@@ -12,6 +14,7 @@ import (
 	"github.com/AbhaySingh002/supremo/internal/tools/git_tools"
 	"github.com/AbhaySingh002/supremo/internal/tools/search"
 	"github.com/AbhaySingh002/supremo/internal/tools/terminal"
+	"github.com/AbhaySingh002/supremo/internal/tools/web_search"
 )
 
 // App is the composition root that holds the high-level initialized dependencies.
@@ -28,7 +31,11 @@ func New() (*App, error) {
 
 	// 1. Load/Create configuration using Provider Manager
 	fmt.Println("Initializing Provider...")
-	configDir := ".supremo"
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("find user home directory: %w", err)
+	}
+	configDir := filepath.Join(home, ".supremo")
 
 	credStore := providers.NewFileCredentialStore(configDir)
 	providerManager := providers.NewManager(configDir, credStore)
@@ -62,6 +69,7 @@ func New() (*App, error) {
 		&search.FindSymbol{},
 		&search.SearchFileName{},
 		&search.SearchText{},
+		&web_search.WebFetch{},
 	}
 
 	for _, t := range allTools {

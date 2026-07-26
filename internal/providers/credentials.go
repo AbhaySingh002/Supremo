@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/AbhaySingh002/supremo/internal/storage"
 )
 
 const (
@@ -95,5 +97,5 @@ func (s *FileCredentialStore) save(creds *Credentials) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.filePath, data, 0600)
+	return storage.WriteFileAtomic(s.filePath, data, 0600)
 }

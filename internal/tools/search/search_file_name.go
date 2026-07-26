@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,7 +26,8 @@ type SearchFileNameInput struct {
 }
 
 type SearchFileNameOutput struct {
-	Matches []FileNameMatch `json:"matches"`
+	Matches   []FileNameMatch `json:"matches"`
+	Truncated bool            `json:"truncated,omitempty"`
 }
 
 type FileNameMatch struct {
@@ -85,7 +87,7 @@ func (t *SearchFileName) Execute(ctx context.Context, input any) (*tools.ToolRes
 	}
 
 	// Validate and resolve path
-	absPath, err := tools.ValidateAndResolvePath(parsed.Path)
+	absPath, err := tools.ValidateAndResolvePath(ctx, parsed.Path)
 	if err != nil {
 		return tools.BuildToolResult(false, "Failed to resolve absolute path: "+err.Error(), nil), nil
 	}
@@ -95,32 +97,36 @@ func (t *SearchFileName) Execute(ctx context.Context, input any) (*tools.ToolRes
 		return tools.BuildToolResult(false, "Path does not exist", nil), nil
 	}
 
-	// Set default max depth if not specified
-	maxDepth := parsed.MaxDepth
-	if maxDepth <= 0 {
-		maxDepth = 10 // Reasonable default
-	}
+	maxDepth := tools.SearchDepthLimit(parsed.MaxDepth)
 
 	// Prepare search pattern - convert glob to simple matching
 	searchPattern := parsed.Pattern
 	if !parsed.CaseSensitive {
 		searchPattern = strings.ToLower(parsed.Pattern)
 	}
+	if _, err := filepath.Match(searchPattern, ""); err != nil {
+		return tools.BuildToolResult(false, "Invalid file name pattern: "+err.Error(), nil), nil
+	}
 
 	// Search for matches
 	matches := []FileNameMatch{}
+	truncated := false
 	err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err != nil {
 			return nil // Skip files we can't access
 		}
 
-		// Check depth for directories
 		if info.IsDir() {
-			relPath, err := filepath.Rel(absPath, path)
+			if tools.IsHidden(info.Name()) && path != absPath {
+				return filepath.SkipDir
+			}
+			depth, err := tools.SearchDepth(absPath, path)
 			if err != nil {
 				return nil
 			}
-			depth := strings.Count(relPath, string(filepath.Separator))
 			if depth > maxDepth {
 				return filepath.SkipDir
 			}
@@ -129,12 +135,12 @@ func (t *SearchFileName) Execute(ctx context.Context, input any) (*tools.ToolRes
 		// Get the base name
 		baseName := filepath.Base(path)
 
-		// Skip hidden files
-		if tools.IsHidden(baseName) {
-			if info.IsDir() {
-				return filepath.SkipDir
-			}
+		if tools.ShouldSkipFile(path) {
 			return nil
+		}
+		depth, err := tools.SearchDepth(absPath, path)
+		if err != nil || depth > maxDepth {
+			return err
 		}
 
 		// Match the pattern
@@ -143,8 +149,12 @@ func (t *SearchFileName) Execute(ctx context.Context, input any) (*tools.ToolRes
 			nameToMatch = strings.ToLower(baseName)
 		}
 
-		// Simple glob matching (supports * wildcard)
-		if matchesPattern(nameToMatch, searchPattern) {
+		matched, _ := filepath.Match(searchPattern, nameToMatch)
+		if matched {
+			if len(matches) == tools.MaxSearchResults {
+				truncated = true
+				return tools.ErrSearchLimit
+			}
 			matchType := "file"
 			if info.IsDir() {
 				matchType = "directory"
@@ -159,6 +169,9 @@ func (t *SearchFileName) Execute(ctx context.Context, input any) (*tools.ToolRes
 		return nil
 	})
 
+	if errors.Is(err, tools.ErrSearchLimit) {
+		err = nil
+	}
 	if err != nil {
 		return &tools.ToolResult{
 			Success: false,
@@ -168,7 +181,8 @@ func (t *SearchFileName) Execute(ctx context.Context, input any) (*tools.ToolRes
 
 	// Build output
 	output := SearchFileNameOutput{
-		Matches: matches,
+		Matches:   matches,
+		Truncated: truncated,
 	}
 
 	// Convert output to map for ToolResult
@@ -178,44 +192,4 @@ func (t *SearchFileName) Execute(ctx context.Context, input any) (*tools.ToolRes
 	}
 
 	return tools.BuildToolResult(true, "Search completed", dataMap), nil
-}
-
-// matchesPattern checks if a name matches a glob pattern (supports * wildcard)
-func matchesPattern(name, pattern string) bool {
-	// If pattern has no wildcard, do exact match
-	if !strings.Contains(pattern, "*") {
-		return name == pattern
-	}
-
-	// Simple glob matching
-	patternParts := strings.Split(pattern, "*")
-	if len(patternParts) == 0 {
-		return true
-	}
-
-	// Check if name starts with first part
-	if !strings.HasPrefix(name, patternParts[0]) {
-		return false
-	}
-
-	// Check if name ends with last part
-	if !strings.HasSuffix(name, patternParts[len(patternParts)-1]) {
-		return false
-	}
-
-	// Check middle parts in order
-	currentPos := len(patternParts[0])
-	for i := 1; i < len(patternParts)-1; i++ {
-		part := patternParts[i]
-		if part == "" {
-			continue
-		}
-		idx := strings.Index(name[currentPos:], part)
-		if idx == -1 {
-			return false
-		}
-		currentPos += idx + len(part)
-	}
-
-	return true
 }

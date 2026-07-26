@@ -2,8 +2,6 @@ package file_system
 
 import (
 	"context"
-	"os"
-
 	"github.com/AbhaySingh002/supremo/internal/tools"
 )
 
@@ -55,7 +53,7 @@ func (t *ReadFile) Execute(ctx context.Context, input any) (*tools.ToolResult, e
 	}
 
 	// Validate and resolve path
-	absPath, err := tools.ValidateAndResolvePath(parsed.Path)
+	absPath, err := tools.ValidateAndResolvePath(ctx, parsed.Path)
 	if err != nil {
 		return tools.BuildToolResult(false, "Path cannot be empty or is invalid", nil), nil
 	}
@@ -75,7 +73,10 @@ func (t *ReadFile) Execute(ctx context.Context, input any) (*tools.ToolResult, e
 	}
 
 	// Read file content
-	content, err := os.ReadFile(absPath)
+	if info.Size() > tools.MaxFileBytes {
+		return tools.BuildToolResult(false, "File exceeds 1 MiB read limit", nil), nil
+	}
+	content, err := tools.ReadLimitedFile(absPath, tools.MaxFileBytes)
 	if err != nil {
 		return &tools.ToolResult{
 			Success: false,

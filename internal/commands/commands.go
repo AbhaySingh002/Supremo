@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/AbhaySingh002/supremo/internal/agent"
@@ -23,7 +25,15 @@ type Command struct {
 // Registry holds the list of registered commands.
 type Registry struct {
 	commands map[string]Command
+	cancel   func() bool
+	resume   func() error
 }
+
+// SetCancel connects /cancel to the interactive shell's active task.
+func (r *Registry) SetCancel(cancel func() bool) { r.cancel = cancel }
+
+// SetResume connects /plan resume to the interactive shell.
+func (r *Registry) SetResume(resume func() error) { r.resume = resume }
 
 // NewRegistry constructs a Registry and registers all standard commands.
 func NewRegistry() *Registry {
@@ -50,7 +60,7 @@ func NewRegistry() *Registry {
 		Name:        "/clear",
 		Description: "Clear current conversation",
 		Execute: func(ctx context.Context, app *app.App, session *agent.Session, args []string) (string, error) {
-			if err := app.Agent.Memory().Clear(ctx, session.ID); err != nil {
+			if err := app.Agent.ClearMemory(ctx, session.ID); err != nil {
 				return "", err
 			}
 			return "Conversation cleared.", nil
@@ -62,17 +72,149 @@ func NewRegistry() *Registry {
 		Name:        "/reset",
 		Description: "Reset agent state",
 		Execute: func(ctx context.Context, app *app.App, session *agent.Session, args []string) (string, error) {
-			if err := app.Agent.Memory().Clear(ctx, session.ID); err != nil {
+			if err := app.Agent.ClearMemory(ctx, session.ID); err != nil {
 				return "", err
 			}
-			session.OpenFiles = nil
 			session.CurrentPlanID = ""
-			session.Metadata = make(map[string]interface{})
+			session.PlanMode = false
+			session.DryRun = false
+			if err := session.Save("."); err != nil {
+				return "", err
+			}
 			return "Agent state and conversation history reset.", nil
 		},
 	})
 
-	// 4. /exit
+	// 4. /plan
+	r.Register(Command{
+		Name:        "/krypton",
+		Description: "Remove Supremo state from this workspace (keeps global credentials)",
+		Execute: func(_ context.Context, _ *app.App, session *agent.Session, args []string) (string, error) {
+			if len(args) != 0 {
+				return "", fmt.Errorf("usage: /krypton")
+			}
+			root, err := os.Getwd()
+			if err != nil {
+				return "", err
+			}
+			for _, name := range []string{".memory", ".session", ".scratchpad"} {
+				if err := os.RemoveAll(filepath.Join(root, name)); err != nil {
+					return "", fmt.Errorf("remove %s: %w", name, err)
+				}
+			}
+			if session != nil {
+				session.CurrentPlanID = ""
+				session.PlanMode = false
+				session.DryRun = false
+			}
+			return "Supremo workspace state removed. Global configuration and credentials were kept.", nil
+		},
+	})
+
+	// 5. /plan
+	r.Register(Command{
+		Name:        "/plan",
+		Description: "Toggle plan mode; status, show, or resume an active plan",
+		Execute: func(ctx context.Context, app *app.App, session *agent.Session, args []string) (string, error) {
+			if len(args) == 1 {
+				plan, err := session.ActivePlan(".")
+				if err != nil {
+					return "", err
+				}
+				switch args[0] {
+				case "status":
+					if plan == nil {
+						return fmt.Sprintf("Plan mode: %t\nNo active plan.", session.PlanMode), nil
+					}
+					return fmt.Sprintf("Plan mode: %t\n%s", session.PlanMode, plan.Context()), nil
+				case "show":
+					if plan == nil {
+						return "No active plan.", nil
+					}
+					return plan.Context(), nil
+				case "resume":
+					if plan == nil {
+						return "", fmt.Errorf("no active plan")
+					}
+					if r.resume == nil {
+						return "", fmt.Errorf("plan resume is unavailable")
+					}
+					return "", r.resume()
+				}
+			}
+			if len(args) != 0 {
+				return "", fmt.Errorf("usage: /plan [status|show|resume]")
+			}
+			session.PlanMode = !session.PlanMode
+			if err := session.Save("."); err != nil {
+				return "", err
+			}
+			if session.PlanMode {
+				return "Plan mode enabled.", nil
+			}
+			return "Plan mode disabled.", nil
+		},
+	})
+
+	// 6. /approve
+	r.Register(Command{
+		Name:        "/approve",
+		Description: "Approve the pending mutating tool call",
+		Execute: func(ctx context.Context, app *app.App, session *agent.Session, args []string) (string, error) {
+			if len(args) != 0 {
+				return "", fmt.Errorf("usage: /approve")
+			}
+			if app == nil || !app.Agent.ApprovePendingTool() {
+				return "No tool call is awaiting approval.", nil
+			}
+			return "Tool call approved.", nil
+		},
+	})
+
+	// 7. /deny
+	r.Register(Command{
+		Name:        "/deny",
+		Description: "Deny the pending mutating tool call",
+		Execute: func(ctx context.Context, app *app.App, session *agent.Session, args []string) (string, error) {
+			if app == nil || !app.Agent.DenyPendingTool(strings.Join(args, " ")) {
+				return "No tool call is awaiting approval.", nil
+			}
+			return "Tool call denied.", nil
+		},
+	})
+
+	// 8. /dry-run
+	r.Register(Command{
+		Name:        "/dry-run",
+		Description: "Toggle dry run for mutating tool calls",
+		Execute: func(ctx context.Context, app *app.App, session *agent.Session, args []string) (string, error) {
+			if len(args) != 0 {
+				return "", fmt.Errorf("usage: /dry-run")
+			}
+			session.DryRun = !session.DryRun
+			if err := session.Save("."); err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("Dry run %s.", map[bool]string{true: "enabled", false: "disabled"}[session.DryRun]), nil
+		},
+	})
+
+	// 9. /cancel
+	r.Register(Command{
+		Name:        "/cancel",
+		Description: "Cancel the active task",
+		Execute: func(ctx context.Context, app *app.App, session *agent.Session, args []string) (string, error) {
+			if len(args) != 0 {
+				return "", fmt.Errorf("usage: /cancel")
+			}
+			if r.cancel == nil || !r.cancel() {
+				return "No active task.", nil
+			}
+			return "Cancellation requested.", nil
+		},
+	})
+
+	// 10. /exit
 	r.Register(Command{
 		Name:        "/exit",
 		Description: "Exit the application",
@@ -81,7 +223,7 @@ func NewRegistry() *Registry {
 		},
 	})
 
-	// 5. /auth
+	// 11. /auth
 	r.Register(Command{
 		Name:        "/auth",
 		Description: "Update API key",
@@ -97,7 +239,7 @@ func NewRegistry() *Registry {
 		},
 	})
 
-	// 6. /model
+	// 12. /model
 	r.Register(Command{
 		Name:        "/model",
 		Description: "Change model (e.g. gemini-2.5-flash)",
@@ -112,7 +254,7 @@ func NewRegistry() *Registry {
 		},
 	})
 
-	// 7. /config
+	// 13. /config
 	r.Register(Command{
 		Name:        "/config",
 		Description: "View or reload configuration",
@@ -139,7 +281,7 @@ func (r *Registry) Register(cmd Command) {
 
 // List returns all registered commands sorted by name.
 func (r *Registry) List() []Command {
-	names := []string{"/help", "/clear", "/reset", "/auth", "/model", "/config", "/exit"}
+	names := []string{"/help", "/clear", "/reset", "/krypton", "/plan", "/approve", "/deny", "/dry-run", "/cancel", "/auth", "/model", "/config", "/exit"}
 	var list []Command
 	for _, name := range names {
 		if cmd, ok := r.commands[name]; ok {

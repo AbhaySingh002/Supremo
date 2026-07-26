@@ -2,7 +2,6 @@ package git_tools
 
 import (
 	"context"
-	"os/exec"
 	"strconv"
 	"strings"
 
@@ -24,7 +23,8 @@ type GitLogInput struct {
 }
 
 type GitLogOutput struct {
-	Commits []CommitInfo `json:"commits"`
+	Commits   []CommitInfo `json:"commits"`
+	Truncated bool         `json:"truncated,omitempty"`
 }
 
 type CommitInfo struct {
@@ -69,12 +69,17 @@ func (t *GitLog) Execute(ctx context.Context, input any) (*tools.ToolResult, err
 	}
 
 	// Validate directory
-	if err := tools.ValidateDirectory(parsed.Directory); err != nil {
+	directory, err := tools.ValidateDirectory(ctx, parsed.Directory)
+	if err != nil {
 		return tools.BuildToolResult(false, "Directory cannot be empty", nil), nil
 	}
+	parsed.Directory = directory
 
 	// Check if directory is a git repository
-	if err := IsGitRepository(parsed.Directory); err != nil {
+	if err := IsGitRepository(ctx, parsed.Directory); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return tools.BuildToolResult(false, "Not a git repository", nil), nil
 	}
 
@@ -86,20 +91,20 @@ func (t *GitLog) Execute(ctx context.Context, input any) (*tools.ToolResult, err
 
 	// Get git log with formatted output
 	args := []string{"log", "-n", strconv.Itoa(limit), "--pretty=format:%H|%an|%ai|%s"}
-	cmd := exec.Command("git", args...)
-	cmd.Dir = parsed.Directory
-
-	output, err := cmd.Output()
+	output, err := runGit(ctx, parsed.Directory, args...)
 	if err != nil {
 		return &tools.ToolResult{
 			Success: false,
 			Message: "Failed to get git log: " + err.Error(),
 		}, nil
 	}
+	if output.ExitCode != 0 {
+		return tools.BuildToolResult(false, "Failed to get git log: "+string(output.Stderr), nil), nil
+	}
 
 	// Parse the output
 	commits := []CommitInfo{}
-	lines := strings.Split(string(output), "\n")
+	lines := strings.Split(string(output.Stdout), "\n")
 
 	for _, line := range lines {
 		if line == "" {
@@ -122,7 +127,8 @@ func (t *GitLog) Execute(ctx context.Context, input any) (*tools.ToolResult, err
 
 	// Build output
 	outputData := GitLogOutput{
-		Commits: commits,
+		Commits:   commits,
+		Truncated: output.StdoutTruncated,
 	}
 
 	// Convert output to map for ToolResult

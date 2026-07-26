@@ -60,7 +60,7 @@ func (t *FileInfo) Execute(ctx context.Context, input any) (*tools.ToolResult, e
 	}
 
 	// Validate and resolve path
-	absPath, err := tools.ValidateAndResolvePath(parsed.Path)
+	absPath, err := tools.ValidateAndResolvePath(ctx, parsed.Path)
 	if err != nil {
 		return tools.BuildToolResult(false, "Path cannot be empty or is invalid", nil), nil
 	}

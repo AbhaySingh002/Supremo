@@ -12,7 +12,7 @@ else
     TARGET_DIR=test_server
 endif
 
-.PHONY: all build run test clean fmt
+.PHONY: all build run test clean fmt precommit
 
 all: build
 
@@ -24,6 +24,11 @@ run:
 
 test:
 	go test -v ./...
+
+precommit:
+	go test -race ./...
+	go vet ./...
+	go build ./...
 
 fmt:
 	go fmt ./...

@@ -36,14 +36,3 @@ func (r *RuntimeConfig) GetClient() Provider {
 	defer r.mu.RUnlock()
 	return r.activeClient
 }
-
-// Update changes active details.
-func (r *RuntimeConfig) Update(providerName, model, endpoint, apiKey string, client Provider) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.providerName = providerName
-	r.model = model
-	r.endpoint = endpoint
-	r.apiKey = apiKey
-	r.activeClient = client
-}

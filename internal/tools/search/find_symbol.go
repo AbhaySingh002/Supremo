@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -28,7 +29,8 @@ type FindSymbolInput struct {
 }
 
 type FindSymbolOutput struct {
-	Matches []SymbolMatch `json:"matches"`
+	Matches   []SymbolMatch `json:"matches"`
+	Truncated bool          `json:"truncated,omitempty"`
 }
 
 type SymbolMatch struct {
@@ -85,7 +87,7 @@ func (t *FindSymbol) Execute(ctx context.Context, input any) (*tools.ToolResult,
 	}
 
 	// Validate and resolve path
-	absPath, err := tools.ValidateAndResolvePath(parsed.Directory)
+	absPath, err := tools.ValidateAndResolvePath(ctx, parsed.Directory)
 	if err != nil {
 		return tools.BuildToolResult(false, "Failed to resolve absolute path: "+err.Error(), nil), nil
 	}
@@ -100,20 +102,34 @@ func (t *FindSymbol) Execute(ctx context.Context, input any) (*tools.ToolResult,
 
 	// Search for matches
 	matches := []SymbolMatch{}
+	truncated := false
 	err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err != nil {
 			return nil
 		}
 
-		// Skip directories
 		if info.IsDir() {
+			if tools.IsHidden(info.Name()) && path != absPath {
+				return filepath.SkipDir
+			}
+			depth, err := tools.SearchDepth(absPath, path)
+			if err != nil {
+				return err
+			}
+			if depth > tools.MaxSearchDepth {
+				return filepath.SkipDir
+			}
 			return nil
 		}
-
-		// Skip hidden files
-		baseName := filepath.Base(path)
-		if tools.IsHidden(baseName) {
+		if tools.ShouldSkipFile(path) {
 			return nil
+		}
+		depth, err := tools.SearchDepth(absPath, path)
+		if err != nil || depth > tools.MaxSearchDepth {
+			return err
 		}
 
 		// Filter by language extension
@@ -122,7 +138,7 @@ func (t *FindSymbol) Execute(ctx context.Context, input any) (*tools.ToolResult,
 		}
 
 		// Read file content
-		content, err := os.ReadFile(path)
+		content, err := tools.ReadSearchFile(path)
 		if err != nil {
 			return nil
 		}
@@ -132,6 +148,10 @@ func (t *FindSymbol) Execute(ctx context.Context, input any) (*tools.ToolResult,
 		for lineNum, line := range lines {
 			for _, pattern := range patterns {
 				if pattern.regex.MatchString(line) {
+					if len(matches) == tools.MaxSearchResults {
+						truncated = true
+						return tools.ErrSearchLimit
+					}
 					matches = append(matches, SymbolMatch{
 						File:       path,
 						Line:       lineNum + 1,
@@ -146,6 +166,9 @@ func (t *FindSymbol) Execute(ctx context.Context, input any) (*tools.ToolResult,
 		return nil
 	})
 
+	if errors.Is(err, tools.ErrSearchLimit) {
+		err = nil
+	}
 	if err != nil {
 		return &tools.ToolResult{
 			Success: false,
@@ -155,7 +178,8 @@ func (t *FindSymbol) Execute(ctx context.Context, input any) (*tools.ToolResult,
 
 	// Build output
 	output := FindSymbolOutput{
-		Matches: matches,
+		Matches:   matches,
+		Truncated: truncated,
 	}
 
 	// Convert output to map for ToolResult

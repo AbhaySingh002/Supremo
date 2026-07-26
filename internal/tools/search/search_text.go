@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,7 +27,8 @@ type SearchTextInput struct {
 }
 
 type SearchTextOutput struct {
-	Matches []TextMatch `json:"matches"`
+	Matches   []TextMatch `json:"matches"`
+	Truncated bool        `json:"truncated,omitempty"`
 }
 
 type TextMatch struct {
@@ -86,7 +88,7 @@ func (t *SearchText) Execute(ctx context.Context, input any) (*tools.ToolResult,
 	}
 
 	// Validate and resolve path
-	absPath, err := tools.ValidateAndResolvePath(parsed.Path)
+	absPath, err := tools.ValidateAndResolvePath(ctx, parsed.Path)
 	if err != nil {
 		return tools.BuildToolResult(false, "Failed to resolve absolute path: "+err.Error(), nil), nil
 	}
@@ -96,11 +98,7 @@ func (t *SearchText) Execute(ctx context.Context, input any) (*tools.ToolResult,
 		return tools.BuildToolResult(false, "Path does not exist", nil), nil
 	}
 
-	// Set default max depth if not specified
-	maxDepth := parsed.MaxDepth
-	if maxDepth <= 0 {
-		maxDepth = 10 // Reasonable default
-	}
+	maxDepth := tools.SearchDepthLimit(parsed.MaxDepth)
 
 	// Prepare search pattern
 	searchPattern := parsed.Pattern
@@ -110,19 +108,24 @@ func (t *SearchText) Execute(ctx context.Context, input any) (*tools.ToolResult,
 
 	// Search for matches
 	matches := []TextMatch{}
+	truncated := false
 	err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err != nil {
 			return nil // Skip files we can't access
 		}
 
 		// Skip directories
 		if info.IsDir() {
-			// Check depth
-			relPath, err := filepath.Rel(absPath, path)
+			if tools.IsHidden(info.Name()) && path != absPath {
+				return filepath.SkipDir
+			}
+			depth, err := tools.SearchDepth(absPath, path)
 			if err != nil {
 				return nil
 			}
-			depth := strings.Count(relPath, string(filepath.Separator))
 			if depth > maxDepth {
 				return filepath.SkipDir
 			}
@@ -133,9 +136,13 @@ func (t *SearchText) Execute(ctx context.Context, input any) (*tools.ToolResult,
 		if tools.ShouldSkipFile(path) {
 			return nil
 		}
+		depth, err := tools.SearchDepth(absPath, path)
+		if err != nil || depth > maxDepth {
+			return err
+		}
 
 		// Read file content
-		content, err := os.ReadFile(path)
+		content, err := tools.ReadSearchFile(path)
 		if err != nil {
 			return nil // Skip files we can't read
 		}
@@ -149,6 +156,10 @@ func (t *SearchText) Execute(ctx context.Context, input any) (*tools.ToolResult,
 			}
 
 			if strings.Contains(searchLine, searchPattern) {
+				if len(matches) == tools.MaxSearchResults {
+					truncated = true
+					return tools.ErrSearchLimit
+				}
 				matches = append(matches, TextMatch{
 					File:    path,
 					Line:    lineNum + 1,
@@ -160,6 +171,9 @@ func (t *SearchText) Execute(ctx context.Context, input any) (*tools.ToolResult,
 		return nil
 	})
 
+	if errors.Is(err, tools.ErrSearchLimit) {
+		err = nil
+	}
 	if err != nil {
 		return &tools.ToolResult{
 			Success: false,
@@ -169,7 +183,8 @@ func (t *SearchText) Execute(ctx context.Context, input any) (*tools.ToolResult,
 
 	// Build output
 	output := SearchTextOutput{
-		Matches: matches,
+		Matches:   matches,
+		Truncated: truncated,
 	}
 
 	// Convert output to map for ToolResult

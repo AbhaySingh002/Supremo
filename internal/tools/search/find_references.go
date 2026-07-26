@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -29,6 +30,7 @@ type FindReferencesInput struct {
 
 type FindReferencesOutput struct {
 	References []ReferenceMatch `json:"references"`
+	Truncated  bool             `json:"truncated,omitempty"`
 }
 
 type ReferenceMatch struct {
@@ -85,7 +87,7 @@ func (t *FindReferences) Execute(ctx context.Context, input any) (*tools.ToolRes
 	}
 
 	// Validate and resolve path
-	absPath, err := tools.ValidateAndResolvePath(parsed.Directory)
+	absPath, err := tools.ValidateAndResolvePath(ctx, parsed.Directory)
 	if err != nil {
 		return tools.BuildToolResult(false, "Failed to resolve absolute path: "+err.Error(), nil), nil
 	}
@@ -104,20 +106,34 @@ func (t *FindReferences) Execute(ctx context.Context, input any) (*tools.ToolRes
 
 	// Search for references
 	references := []ReferenceMatch{}
+	truncated := false
 	err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err != nil {
 			return nil
 		}
 
-		// Skip directories
 		if info.IsDir() {
+			if tools.IsHidden(info.Name()) && path != absPath {
+				return filepath.SkipDir
+			}
+			depth, err := tools.SearchDepth(absPath, path)
+			if err != nil {
+				return err
+			}
+			if depth > tools.MaxSearchDepth {
+				return filepath.SkipDir
+			}
 			return nil
 		}
-
-		// Skip hidden files
-		baseName := filepath.Base(path)
-		if tools.IsHidden(baseName) {
+		if tools.ShouldSkipFile(path) {
 			return nil
+		}
+		depth, err := tools.SearchDepth(absPath, path)
+		if err != nil || depth > tools.MaxSearchDepth {
+			return err
 		}
 
 		// Filter by language extension
@@ -126,7 +142,7 @@ func (t *FindReferences) Execute(ctx context.Context, input any) (*tools.ToolRes
 		}
 
 		// Read file content
-		content, err := os.ReadFile(path)
+		content, err := tools.ReadSearchFile(path)
 		if err != nil {
 			return nil
 		}
@@ -136,6 +152,10 @@ func (t *FindReferences) Execute(ctx context.Context, input any) (*tools.ToolRes
 		for lineNum, line := range lines {
 			matches := pattern.FindAllStringIndex(line, -1)
 			for _, match := range matches {
+				if len(references) == tools.MaxSearchResults {
+					truncated = true
+					return tools.ErrSearchLimit
+				}
 				// Get context around the match
 				start := match[0] - 20
 				if start < 0 {
@@ -159,6 +179,9 @@ func (t *FindReferences) Execute(ctx context.Context, input any) (*tools.ToolRes
 		return nil
 	})
 
+	if errors.Is(err, tools.ErrSearchLimit) {
+		err = nil
+	}
 	if err != nil {
 		return &tools.ToolResult{
 			Success: false,
@@ -169,6 +192,7 @@ func (t *FindReferences) Execute(ctx context.Context, input any) (*tools.ToolRes
 	// Build output
 	output := FindReferencesOutput{
 		References: references,
+		Truncated:  truncated,
 	}
 
 	// Convert output to map for ToolResult

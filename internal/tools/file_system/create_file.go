@@ -54,7 +54,7 @@ func (t *CreateFile) Execute(ctx context.Context, input any) (*tools.ToolResult,
 	}
 
 	// Validate and resolve path
-	absPath, err := tools.ValidateAndResolvePath(parsed.Path)
+	absPath, err := tools.ValidateAndResolvePath(ctx, parsed.Path)
 	if err != nil {
 		return tools.BuildToolResult(false, "Path cannot be empty or is invalid", nil), nil
 	}
@@ -70,14 +70,16 @@ func (t *CreateFile) Execute(ctx context.Context, input any) (*tools.ToolResult,
 	}
 
 	// Create the file
-	file, err := os.Create(absPath)
+	file, err := os.OpenFile(absPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
 	if err != nil {
 		return &tools.ToolResult{
 			Success: false,
 			Message: "Failed to create file: " + err.Error(),
 		}, nil
 	}
-	file.Close()
+	if err := file.Close(); err != nil {
+		return &tools.ToolResult{Success: false, Message: "Failed to create file: " + err.Error()}, nil
+	}
 
 	// Build output
 	output := CreateFileOutput{

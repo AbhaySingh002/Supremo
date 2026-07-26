@@ -26,10 +26,12 @@ type RunTestsInput struct {
 }
 
 type RunTestsOutput struct {
-	ExitCode      int    `json:"exit_code"`
-	Stdout        string `json:"stdout"`
-	Stderr        string `json:"stderr"`
-	TestFramework string `json:"test_framework"`
+	ExitCode        int    `json:"exit_code"`
+	Stdout          string `json:"stdout"`
+	Stderr          string `json:"stderr"`
+	TestFramework   string `json:"test_framework"`
+	StdoutTruncated bool   `json:"stdout_truncated,omitempty"`
+	StderrTruncated bool   `json:"stderr_truncated,omitempty"`
 }
 
 type RunTests struct{}
@@ -39,7 +41,7 @@ func (t *RunTests) Name() string {
 }
 
 func (t *RunTests) Description() string {
-	return "Runs project tests using the detected test framework (go test, npm test, pytest, etc). Returns exit code, stdout, and stderr."
+	return "Runs project tests with the detected framework and executes repository code automatically. Returns bounded stdout and stderr."
 }
 
 func (t *RunTests) Schema() any {
@@ -72,9 +74,11 @@ func (t *RunTests) Execute(ctx context.Context, input any) (*tools.ToolResult, e
 	}
 
 	// Validate directory
-	if err := tools.ValidateDirectory(parsed.Directory); err != nil {
+	directory, err := tools.ValidateDirectory(ctx, parsed.Directory)
+	if err != nil {
 		return tools.BuildToolResult(false, "Directory cannot be empty", nil), nil
 	}
+	parsed.Directory = directory
 
 	// Detect test framework based on project files
 	testFramework := detectTestFramework(parsed.Directory)
@@ -136,15 +140,14 @@ func (t *RunTests) Execute(ctx context.Context, input any) (*tools.ToolResult, e
 	}
 
 	exitCode := cmdOutput.ExitCode
-	stdoutBytes := cmdOutput.Stdout
-	stderrBytes := cmdOutput.Stderr
-
 	// Build output
 	output := RunTestsOutput{
-		ExitCode:      exitCode,
-		Stdout:        string(stdoutBytes),
-		Stderr:        string(stderrBytes),
-		TestFramework: testFramework,
+		ExitCode:        exitCode,
+		Stdout:          string(cmdOutput.Stdout),
+		Stderr:          string(cmdOutput.Stderr),
+		TestFramework:   testFramework,
+		StdoutTruncated: cmdOutput.StdoutTruncated,
+		StderrTruncated: cmdOutput.StderrTruncated,
 	}
 
 	// Convert output to map for ToolResult
@@ -155,8 +158,10 @@ func (t *RunTests) Execute(ctx context.Context, input any) (*tools.ToolResult, e
 
 	success := exitCode == 0
 	message := "Tests passed"
-	if exitCode == -1 {
+	if cmdOutput.TimedOut {
 		message = "Tests timed out"
+	} else if cmdOutput.Canceled {
+		message = "Tests canceled"
 	} else if exitCode != 0 {
 		message = "Tests failed"
 	}

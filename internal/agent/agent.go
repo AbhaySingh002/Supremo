@@ -2,17 +2,14 @@ package agent
 
 import (
 	"context"
+	"os"
+	"time"
 
 	"github.com/AbhaySingh002/supremo/internal/models"
 	"github.com/AbhaySingh002/supremo/internal/parser"
 	"github.com/AbhaySingh002/supremo/internal/providers"
 	"github.com/AbhaySingh002/supremo/internal/tools"
 )
-
-// Provider defines the interface for communicating with LLM providers.
-type Provider interface {
-	Chat(ctx context.Context, prompt *models.Prompt) (*providers.Completion, error)
-}
 
 // Parser defines the interface for parsing LLM output into tool calls or final answers.
 type Parser interface {
@@ -32,7 +29,6 @@ type ContextBuilder interface {
 // Memory defines the interface for managing and appending conversation history.
 type Memory interface {
 	Append(ctx context.Context, sessionID string, msg models.Message) error
-	Get(ctx context.Context, sessionID string) ([]models.Message, error)
 	GetWindow(ctx context.Context, sessionID string, messageBudget, toolBudget int) ([]models.Message, error)
 	GetSummary(ctx context.Context, sessionID string, budget int) (string, error)
 	PersistentContext(budget int) (string, error)
@@ -41,34 +37,63 @@ type Memory interface {
 
 // Agent coordinates the execution of the ReAct loop across different subsystems.
 type Agent struct {
-	provider       Provider
+	provider       providers.Provider
 	toolManager    *tools.Manager
 	parser         Parser
 	contextBuilder ContextBuilder
 	memory         Memory
+	workspace      string
 	debug          bool
+	progress       func(string)
+}
+
+// SetProgress installs the CLI's small status reporter.
+func (a *Agent) SetProgress(report func(string)) {
+	a.progress = report
+	a.toolManager.SetReporter(report)
+}
+
+func (a *Agent) report(message string) {
+	if a.progress != nil {
+		a.progress(message)
+	}
+}
+
+// ApprovePendingTool releases one mutating tool call waiting for confirmation.
+func (a *Agent) ApprovePendingTool() bool { return a.toolManager.Approve() }
+
+// DenyPendingTool rejects one mutating tool call waiting for confirmation.
+func (a *Agent) DenyPendingTool(reason string) bool { return a.toolManager.Deny(reason) }
+
+func (a *Agent) taskContext(ctx context.Context, session *Session) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	ctx = tools.WithWorkspace(ctx, a.workspace)
+	ctx = tools.WithDryRun(ctx, session.DryRun)
+	return tools.WithToolBudget(ctx, 20), cancel
 }
 
 // NewAgent constructs a new Agent instance.
 func NewAgent(
-	provider Provider,
+	provider providers.Provider,
 	toolManager *tools.Manager,
 	parser Parser,
 	contextBuilder ContextBuilder,
 	memory Memory,
 ) *Agent {
+	workspace, _ := os.Getwd()
 	return &Agent{
 		provider:       provider,
 		toolManager:    toolManager,
 		parser:         parser,
 		contextBuilder: contextBuilder,
 		memory:         memory,
+		workspace:      workspace,
 	}
 }
 
-// Memory returns the memory manager of the agent.
-func (a *Agent) Memory() Memory {
-	return a.memory
+// ClearMemory clears a session without exposing the memory implementation.
+func (a *Agent) ClearMemory(ctx context.Context, sessionID string) error {
+	return a.memory.Clear(ctx, sessionID)
 }
 
 // SetDebug enables or disables debug logging for the agent loop.
@@ -84,9 +109,15 @@ func (a *Agent) executeAll(ctx context.Context, resp *parser.Response) ([]Observ
 
 	var observations []Observation
 	for _, tc := range resp.ToolCalls {
+		a.report("Running " + tc.Name + "…")
 		res, err := a.toolManager.Execute(ctx, tc.Name, tc.Arguments)
 		obs := NewObservation(tc.Name, res, err)
 		observations = append(observations, obs)
+		if obs.Success {
+			a.report(tc.Name + ": completed")
+		} else {
+			a.report(tc.Name + ": failed")
+		}
 
 		if err != nil || !obs.Success {
 			break

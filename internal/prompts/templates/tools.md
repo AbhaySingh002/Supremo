@@ -9,6 +9,7 @@
 * **Minimal Tool Calls**: Use the most specific tool for the job. Avoid redundant calls, and do not call the same tool repeatedly with identical inputs.
 * **Logical Chaining**: Sequence tool calls cleanly (e.g. read file -> modify file -> build code -> test changes).
 * **Fail Fast**: If a critical tool execution fails, stop immediately. Analyze the error and correct the issue before executing subsequent tools.
+* **Execution Risk**: `run_build` and `run_tests` execute project code automatically. `execute_command` is an approval-gated escape hatch and is not sandboxed.
 
 ## Response Grammar
 

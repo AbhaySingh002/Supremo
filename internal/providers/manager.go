@@ -33,10 +33,16 @@ func (m *Manager) Initialize(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to load configs: %w", err)
 	}
-	apiKey, _ := m.credStore.GetAPIKey(cfg.ProviderName)
-	client, err := NewProvider(ctx, cfg.ProviderName, cfg.Model, cfg.Endpoint, apiKey)
+	if cfg.ProviderName != "gemini" {
+		return fmt.Errorf("unsupported provider: %s", cfg.ProviderName)
+	}
+	apiKey, err := m.credStore.GetAPIKey(cfg.ProviderName)
 	if err != nil {
-		client = nil
+		return fmt.Errorf("failed to load API key: %w", err)
+	}
+	client, err := NewGeminiProvider(ctx, apiKey, cfg.Model, cfg.Endpoint)
+	if err != nil {
+		return fmt.Errorf("failed to create Gemini provider: %w", err)
 	}
 	m.runtimeConfig = NewRuntimeConfig(cfg.ProviderName, cfg.Model, cfg.Endpoint, apiKey, client)
 	return nil
@@ -44,10 +50,13 @@ func (m *Manager) Initialize(ctx context.Context) error {
 
 // CurrentProvider returns the active Provider client.
 func (m *Manager) CurrentProvider() Provider {
-	if m.runtimeConfig == nil {
+	m.mu.RLock()
+	runtime := m.runtimeConfig
+	m.mu.RUnlock()
+	if runtime == nil {
 		return nil
 	}
-	return m.runtimeConfig.GetClient()
+	return runtime.GetClient()
 }
 
 // Chat satisfies the agent.Provider interface.
@@ -61,6 +70,8 @@ func (m *Manager) Chat(ctx context.Context, prompt *models.Prompt) (*Completion,
 
 // update applies a setting, persists it, and restores both on client creation failure.
 func (m *Manager) update(ctx context.Context, change func(), persist func() error) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if m.runtimeConfig == nil {
 		return fmt.Errorf("manager not initialized")
 	}
@@ -84,10 +95,12 @@ func (m *Manager) update(ctx context.Context, change func(), persist func() erro
 		restore()
 		return err
 	}
-	client, err := NewProvider(ctx, m.runtimeConfig.providerName, m.runtimeConfig.model, m.runtimeConfig.endpoint, m.runtimeConfig.apiKey)
+	client, err := NewGeminiProvider(ctx, m.runtimeConfig.apiKey, m.runtimeConfig.model, m.runtimeConfig.endpoint)
 	if err != nil {
 		restore()
-		_ = persist()
+		if restoreErr := persist(); restoreErr != nil {
+			return fmt.Errorf("failed to rebuild provider client: %w; failed to restore previous configuration: %v", err, restoreErr)
+		}
 		return fmt.Errorf("failed to rebuild provider client: %w", err)
 	}
 	m.runtimeConfig.activeClient = client
@@ -121,6 +134,9 @@ func (m *Manager) UpdateAPIKey(ctx context.Context, apiKey string) error {
 
 // UpdateProvider switches active provider.
 func (m *Manager) UpdateProvider(ctx context.Context, providerName string) error {
+	if providerName != "gemini" {
+		return fmt.Errorf("unsupported provider: %s", providerName)
+	}
 	return m.update(ctx, func() {
 		m.runtimeConfig.providerName = providerName
 		m.runtimeConfig.apiKey, _ = m.credStore.GetAPIKey(providerName)
@@ -129,5 +145,7 @@ func (m *Manager) UpdateProvider(ctx context.Context, providerName string) error
 
 // GetRuntimeConfig retrieves the active runtime configurations.
 func (m *Manager) GetRuntimeConfig() *RuntimeConfig {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.runtimeConfig
 }

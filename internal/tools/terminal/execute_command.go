@@ -3,7 +3,7 @@ package terminal
 import (
 	"context"
 	"os/exec"
-	"strings"
+	"strconv"
 	"time"
 
 	"github.com/AbhaySingh002/supremo/internal/tools"
@@ -15,8 +15,7 @@ import (
 // perform development tasks.
 // Claude Code and Cursor use this when users ask to run commands or when
 // the agent needs to execute build/test steps as part of the solution.
-// Security: We validate the command, prevent dangerous commands, limit
-// execution time, and run commands in a controlled environment.
+// It is intentionally not a sandbox; the manager requires explicit approval.
 
 type ExecuteCommandInput struct {
 	Command   string   `json:"command"`
@@ -26,9 +25,11 @@ type ExecuteCommandInput struct {
 }
 
 type ExecuteCommandOutput struct {
-	ExitCode int    `json:"exit_code"`
-	Stdout   string `json:"stdout"`
-	Stderr   string `json:"stderr"`
+	ExitCode        int    `json:"exit_code"`
+	Stdout          string `json:"stdout"`
+	Stderr          string `json:"stderr"`
+	StdoutTruncated bool   `json:"stdout_truncated,omitempty"`
+	StderrTruncated bool   `json:"stderr_truncated,omitempty"`
 }
 
 type ExecuteCommand struct{}
@@ -38,7 +39,7 @@ func (t *ExecuteCommand) Name() string {
 }
 
 func (t *ExecuteCommand) Description() string {
-	return "Executes a shell command with optional arguments. Returns exit code, stdout, and stderr."
+	return "Approved escape hatch for arbitrary commands; it is not sandboxed. Returns bounded stdout and stderr."
 }
 
 func (t *ExecuteCommand) Schema() any {
@@ -79,18 +80,6 @@ func (t *ExecuteCommand) Execute(ctx context.Context, input any) (*tools.ToolRes
 		return tools.BuildToolResult(false, "Command cannot be empty", nil), nil
 	}
 
-	// Security: Block dangerous commands
-	dangerousCommands := []string{"rm -rf", "mkfs", "dd if=", ":(){:|:&};:", "sudo rm"}
-	cmdStr := parsed.Command + " " + strings.Join(parsed.Args, " ")
-	for _, dangerous := range dangerousCommands {
-		if strings.Contains(cmdStr, dangerous) {
-			return &tools.ToolResult{
-				Success: false,
-				Message: "Command blocked for security reasons",
-			}, nil
-		}
-	}
-
 	// Set default timeout
 	timeout := 30 * time.Second
 	if parsed.Timeout > 0 {
@@ -103,7 +92,10 @@ func (t *ExecuteCommand) Execute(ctx context.Context, input any) (*tools.ToolRes
 
 	cmd := exec.CommandContext(cmdCtx, parsed.Command, parsed.Args...)
 
-	// Set working directory if specified
+	cmd.Dir = tools.Workspace(ctx)
+	if cmd.Dir == "" {
+		return tools.BuildToolResult(false, "Workspace is required", nil), nil
+	}
 	if parsed.Directory != "" {
 		cmd.Dir = parsed.Directory
 	}
@@ -115,14 +107,13 @@ func (t *ExecuteCommand) Execute(ctx context.Context, input any) (*tools.ToolRes
 	}
 
 	exitCode := cmdOutput.ExitCode
-	stdoutBytes := cmdOutput.Stdout
-	stderrBytes := cmdOutput.Stderr
-
 	// Build output
 	output := ExecuteCommandOutput{
-		ExitCode: exitCode,
-		Stdout:   string(stdoutBytes),
-		Stderr:   string(stderrBytes),
+		ExitCode:        exitCode,
+		Stdout:          string(cmdOutput.Stdout),
+		Stderr:          string(cmdOutput.Stderr),
+		StdoutTruncated: cmdOutput.StdoutTruncated,
+		StderrTruncated: cmdOutput.StderrTruncated,
 	}
 
 	// Convert output to map for ToolResult
@@ -133,10 +124,12 @@ func (t *ExecuteCommand) Execute(ctx context.Context, input any) (*tools.ToolRes
 
 	success := exitCode == 0
 	message := "Command executed"
-	if exitCode == -1 {
+	if cmdOutput.TimedOut {
 		message = "Command timed out"
+	} else if cmdOutput.Canceled {
+		message = "Command canceled"
 	} else if exitCode != 0 {
-		message = "Command failed with exit code " + string(rune('0'+exitCode))
+		message = "Command failed with exit code " + strconv.Itoa(exitCode)
 	}
 
 	return tools.BuildToolResult(success, message, dataMap), nil

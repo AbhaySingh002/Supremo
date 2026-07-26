@@ -2,8 +2,7 @@ package file_system
 
 import (
 	"context"
-	"os"
-
+	"github.com/AbhaySingh002/supremo/internal/storage"
 	"github.com/AbhaySingh002/supremo/internal/tools"
 )
 
@@ -59,7 +58,7 @@ func (t *WriteFile) Execute(ctx context.Context, input any) (*tools.ToolResult, 
 	}
 
 	// Validate and resolve path
-	absPath, err := tools.ValidateAndResolvePath(parsed.Path)
+	absPath, err := tools.ValidateAndResolvePath(ctx, parsed.Path)
 	if err != nil {
 		return tools.BuildToolResult(false, "Path cannot be empty or is invalid", nil), nil
 	}
@@ -78,7 +77,7 @@ func (t *WriteFile) Execute(ctx context.Context, input any) (*tools.ToolResult, 
 	}
 
 	// Write file
-	err = os.WriteFile(absPath, []byte(parsed.Content), 0644)
+	err = storage.WriteFileAtomic(absPath, []byte(parsed.Content), 0644)
 	if err != nil {
 		return &tools.ToolResult{
 			Success: false,

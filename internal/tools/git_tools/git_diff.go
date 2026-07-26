@@ -2,7 +2,6 @@ package git_tools
 
 import (
 	"context"
-	"os/exec"
 
 	"github.com/AbhaySingh002/supremo/internal/tools"
 )
@@ -22,7 +21,8 @@ type GitDiffInput struct {
 }
 
 type GitDiffOutput struct {
-	Diff string `json:"diff"`
+	Diff      string `json:"diff"`
+	Truncated bool   `json:"truncated,omitempty"`
 }
 
 type GitDiff struct{}
@@ -64,12 +64,17 @@ func (t *GitDiff) Execute(ctx context.Context, input any) (*tools.ToolResult, er
 	}
 
 	// Validate directory
-	if err := tools.ValidateDirectory(parsed.Directory); err != nil {
+	directory, err := tools.ValidateDirectory(ctx, parsed.Directory)
+	if err != nil {
 		return tools.BuildToolResult(false, "Directory cannot be empty", nil), nil
 	}
+	parsed.Directory = directory
 
 	// Check if directory is a git repository
-	if err := IsGitRepository(parsed.Directory); err != nil {
+	if err := IsGitRepository(ctx, parsed.Directory); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return tools.BuildToolResult(false, "Not a git repository", nil), nil
 	}
 
@@ -84,20 +89,21 @@ func (t *GitDiff) Execute(ctx context.Context, input any) (*tools.ToolResult, er
 		args = append(args, "--", parsed.File)
 	}
 
-	cmd := exec.Command("git", args...)
-	cmd.Dir = parsed.Directory
-
-	output, err := cmd.Output()
+	output, err := runGit(ctx, parsed.Directory, args...)
 	if err != nil {
 		return &tools.ToolResult{
 			Success: false,
 			Message: "Failed to get git diff: " + err.Error(),
 		}, nil
 	}
+	if output.ExitCode != 0 {
+		return tools.BuildToolResult(false, "Failed to get git diff: "+string(output.Stderr), nil), nil
+	}
 
 	// Build output
 	outputData := GitDiffOutput{
-		Diff: string(output),
+		Diff:      string(output.Stdout),
+		Truncated: output.StdoutTruncated,
 	}
 
 	// Convert output to map for ToolResult

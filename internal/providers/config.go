@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/AbhaySingh002/supremo/internal/storage"
 	"gopkg.in/yaml.v3"
 )
 
@@ -14,10 +15,9 @@ const (
 
 // Config represents the persisted YAML configuration for Supremo.
 type Config struct {
-	ProviderName string            `yaml:"provider_name"`
-	Model        string            `yaml:"model"`
-	Endpoint     string            `yaml:"endpoint"`
-	Settings     map[string]string `yaml:"settings,omitempty"`
+	ProviderName string `yaml:"provider_name"`
+	Model        string `yaml:"model"`
+	Endpoint     string `yaml:"endpoint"`
 }
 
 // EnsureConfigDir creates the config directory path if it does not exist.
@@ -58,5 +58,5 @@ func SaveConfig(dir string, cfg *Config) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0600)
+	return storage.WriteFileAtomic(path, data, 0600)
 }

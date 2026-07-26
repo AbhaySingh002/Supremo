@@ -65,12 +65,12 @@ func (t *RenameFile) Execute(ctx context.Context, input any) (*tools.ToolResult,
 	}
 
 	// Validate and resolve paths
-	oldAbsPath, err := tools.ValidateAndResolvePath(parsed.OldPath)
+	oldAbsPath, err := tools.ValidateAndResolvePath(ctx, parsed.OldPath)
 	if err != nil {
 		return tools.BuildToolResult(false, "Failed to resolve old path: "+err.Error(), nil), nil
 	}
 
-	newAbsPath, err := tools.ValidateAndResolvePath(parsed.NewPath)
+	newAbsPath, err := tools.ValidateAndResolvePath(ctx, parsed.NewPath)
 	if err != nil {
 		return tools.BuildToolResult(false, "Failed to resolve new path: "+err.Error(), nil), nil
 	}

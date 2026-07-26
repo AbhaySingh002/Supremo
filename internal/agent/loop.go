@@ -13,6 +13,11 @@ func (a *Agent) Run(
 	session *Session,
 	userInput string,
 ) (string, error) {
+	ctx, cancel := a.taskContext(ctx, session)
+	defer cancel()
+	if session.PlanMode {
+		return a.runPlanMode(ctx, session, userInput)
+	}
 
 	state := &State{
 		CurrentIteration: 0,
@@ -60,10 +65,10 @@ func (a *Agent) Run(
 		completion, err := a.provider.Chat(ctx, prompt)
 		if err != nil {
 			state.LastError = err
-			if a.debug {
-				fmt.Printf("[DEBUG] Provider error (will retry): %v\n", err)
-			}
-			continue // Retry on next iteration instead of aborting
+			return "", fmt.Errorf("provider request: %w", err)
+		}
+		if completion == nil {
+			return "", fmt.Errorf("provider returned no completion")
 		}
 
 		response := completion.Raw

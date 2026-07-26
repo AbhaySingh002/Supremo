@@ -25,10 +25,12 @@ type RunBuildInput struct {
 }
 
 type RunBuildOutput struct {
-	ExitCode  int    `json:"exit_code"`
-	Stdout    string `json:"stdout"`
-	Stderr    string `json:"stderr"`
-	BuildTool string `json:"build_tool"`
+	ExitCode        int    `json:"exit_code"`
+	Stdout          string `json:"stdout"`
+	Stderr          string `json:"stderr"`
+	BuildTool       string `json:"build_tool"`
+	StdoutTruncated bool   `json:"stdout_truncated,omitempty"`
+	StderrTruncated bool   `json:"stderr_truncated,omitempty"`
 }
 
 type RunBuild struct{}
@@ -38,7 +40,7 @@ func (t *RunBuild) Name() string {
 }
 
 func (t *RunBuild) Description() string {
-	return "Builds the project using the detected build tool (go build, npm run build, cargo build, etc). Returns exit code, stdout, and stderr."
+	return "Builds the project with the detected tool and executes repository code automatically. Returns bounded stdout and stderr."
 }
 
 func (t *RunBuild) Schema() any {
@@ -71,9 +73,11 @@ func (t *RunBuild) Execute(ctx context.Context, input any) (*tools.ToolResult, e
 	}
 
 	// Validate directory
-	if err := tools.ValidateDirectory(parsed.Directory); err != nil {
+	directory, err := tools.ValidateDirectory(ctx, parsed.Directory)
+	if err != nil {
 		return tools.BuildToolResult(false, "Directory cannot be empty", nil), nil
 	}
+	parsed.Directory = directory
 
 	// Detect build tool based on project files
 	buildTool := detectBuildTool(parsed.Directory)
@@ -135,15 +139,14 @@ func (t *RunBuild) Execute(ctx context.Context, input any) (*tools.ToolResult, e
 	}
 
 	exitCode := cmdOutput.ExitCode
-	stdoutBytes := cmdOutput.Stdout
-	stderrBytes := cmdOutput.Stderr
-
 	// Build output
 	output := RunBuildOutput{
-		ExitCode:  exitCode,
-		Stdout:    string(stdoutBytes),
-		Stderr:    string(stderrBytes),
-		BuildTool: buildTool,
+		ExitCode:        exitCode,
+		Stdout:          string(cmdOutput.Stdout),
+		Stderr:          string(cmdOutput.Stderr),
+		BuildTool:       buildTool,
+		StdoutTruncated: cmdOutput.StdoutTruncated,
+		StderrTruncated: cmdOutput.StderrTruncated,
 	}
 
 	// Convert output to map for ToolResult
@@ -154,8 +157,10 @@ func (t *RunBuild) Execute(ctx context.Context, input any) (*tools.ToolResult, e
 
 	success := exitCode == 0
 	message := "Build succeeded"
-	if exitCode == -1 {
+	if cmdOutput.TimedOut {
 		message = "Build timed out"
+	} else if cmdOutput.Canceled {
+		message = "Build canceled"
 	} else if exitCode != 0 {
 		message = "Build failed"
 	}

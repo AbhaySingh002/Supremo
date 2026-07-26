@@ -6,17 +6,22 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
 
 	"github.com/AbhaySingh002/supremo/internal/models"
+	"github.com/AbhaySingh002/supremo/internal/storage"
 )
 
 const (
-	toolSnippetTokens = 1_000
-	summaryTokens     = 1_000
+	toolSnippetTokens  = 1_000
+	summaryTokens      = 1_000
+	maxProgressBytes   = 48 * 1024
+	maxProgressLines   = 100
+	maxScratchpadBytes = 64 * 1024 * 1024
 )
 
 // InMemoryMemory keeps the hot conversation window and checkpoints it locally.
@@ -72,16 +77,6 @@ func (m *InMemoryMemory) Append(_ context.Context, sessionID string, msg models.
 	return m.checkpointLocked(sessionID)
 }
 
-// Get retrieves the current hot history for a session.
-func (m *InMemoryMemory) Get(_ context.Context, sessionID string) ([]models.Message, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if err := m.loadLocked(sessionID); err != nil {
-		return nil, err
-	}
-	return m.messages[sessionID], nil
-}
-
 // GetWindow returns the newest history that fits the message and tool budgets.
 // Older messages are condensed into a durable structured summary.
 func (m *InMemoryMemory) GetWindow(_ context.Context, sessionID string, messageBudget, toolBudget int) ([]models.Message, error) {
@@ -108,6 +103,22 @@ func (m *InMemoryMemory) GetWindow(_ context.Context, sessionID string, messageB
 			messageTokens += tokens
 		}
 		start--
+	}
+	if start == len(messages) && len(messages) > 0 {
+		latest := messages[len(messages)-1]
+		budget := messageBudget
+		if latest.Role == models.RoleTool {
+			budget = toolBudget
+		}
+		latest.Content = truncateTokens(latest.Content, budget)
+		if len(messages) > 1 {
+			m.summaries[sessionID] = summarize(m.summaries[sessionID], messages[:len(messages)-1])
+			m.messages[sessionID] = messages[len(messages)-1:]
+			if err := m.checkpointLocked(sessionID); err != nil {
+				return nil, err
+			}
+		}
+		return []models.Message{latest}, nil
 	}
 	if start > 0 {
 		m.summaries[sessionID] = summarize(m.summaries[sessionID], messages[:start])
@@ -144,7 +155,9 @@ func (m *InMemoryMemory) PersistentContext(budget int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return truncateTokens("# Workspace Memory\n"+string(memory)+"\n\n# Recent Progress\n"+string(progress), budget), nil
+	memoryText := truncateTokens(string(memory), budget/2)
+	remaining := budget - estimateTokens(memoryText)
+	return "# Workspace Memory\n" + memoryText + "\n\n# Recent Progress\n" + truncateTailTokens(string(progress), remaining), nil
 }
 
 // Clear removes a session's hot state and durable checkpoint.
@@ -194,7 +207,7 @@ func (m *InMemoryMemory) checkpointLocked(sessionID string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(m.sessionPath(sessionID), data, 0600)
+	return storage.WriteFileAtomic(m.sessionPath(sessionID), data, 0600)
 }
 
 func (m *InMemoryMemory) pruneToolLocked(sessionID string, msg *models.Message) error {
@@ -204,7 +217,10 @@ func (m *InMemoryMemory) pruneToolLocked(sessionID string, msg *models.Message) 
 		return err
 	}
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(msg.Content), 0600); err != nil {
+	if err := storage.WriteFileAtomic(path, []byte(msg.Content), 0600); err != nil {
+		return err
+	}
+	if err := m.pruneScratchpadLocked(dir); err != nil {
 		return err
 	}
 	msg.Content = fmt.Sprintf("[Tool output truncated; full output: %s]\n%s", filepath.ToSlash(filepath.Join(".scratchpad", safeSessionID(sessionID), name)), truncateTokens(msg.Content, toolSnippetTokens))
@@ -212,14 +228,25 @@ func (m *InMemoryMemory) pruneToolLocked(sessionID string, msg *models.Message) 
 }
 
 func (m *InMemoryMemory) appendProgressLocked(sessionID, observation string) error {
+	path := filepath.Join(m.root, ".memory", "progress.md")
 	entry := fmt.Sprintf("- %s session %s: %s\n", time.Now().UTC().Format(time.RFC3339), safeSessionID(sessionID), observation)
-	file, err := os.OpenFile(filepath.Join(m.root, ".memory", "progress.md"), os.O_APPEND|os.O_WRONLY, 0600)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-	_, err = file.WriteString(entry)
-	return err
+	lines := append(strings.Split(strings.TrimSuffix(string(data), "\n"), "\n"), strings.TrimSuffix(entry, "\n"))
+	if len(lines) > maxProgressLines+1 {
+		lines = append(lines[:1], lines[len(lines)-maxProgressLines:]...)
+	}
+	progress := strings.Join(lines, "\n") + "\n"
+	if len(progress) > maxProgressBytes {
+		body := progress[len(progress)-maxProgressBytes:]
+		if first := strings.IndexByte(body, '\n'); first >= 0 {
+			body = body[first+1:]
+		}
+		progress = "# Progress\n\n" + body
+	}
+	return storage.WriteFileAtomic(path, []byte(progress), 0600)
 }
 
 func (m *InMemoryMemory) ensureStorageLocked() error {
@@ -229,16 +256,52 @@ func (m *InMemoryMemory) ensureStorageLocked() error {
 		}
 	}
 	defaults := map[string]string{
-		"MEMORY.md": "# Codebase Memory\n\n## Architecture\n- Go CLI coding agent with local tools and Gemini provider support.\n\n## Dependencies\n- Standard library, Google GenAI SDK, and yaml.v3.\n\n## Decisions\n- Keep durable agent state in local Markdown and JSON files.\n",
+		"MEMORY.md":   "# Codebase Memory\n\n## Architecture\n- Go CLI coding agent with local tools and Gemini provider support.\n\n## Dependencies\n- Standard library, Google GenAI SDK, and yaml.v3.\n\n## Decisions\n- Keep durable agent state in local Markdown and JSON files.\n",
 		"progress.md": "# Progress\n\n",
 	}
 	for name, content := range defaults {
 		path := filepath.Join(m.root, ".memory", name)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
-			if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+			if err := storage.WriteFileAtomic(path, []byte(content), 0600); err != nil {
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+func (m *InMemoryMemory) pruneScratchpadLocked(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	type entry struct {
+		path string
+		size int64
+		time time.Time
+	}
+	files := make([]entry, 0, len(entries))
+	var total int64
+	for _, dirEntry := range entries {
+		if dirEntry.IsDir() {
+			continue
+		}
+		info, err := dirEntry.Info()
+		if err != nil {
+			return err
+		}
+		files = append(files, entry{filepath.Join(dir, dirEntry.Name()), info.Size(), info.ModTime()})
+		total += info.Size()
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].time.Before(files[j].time) })
+	for _, file := range files {
+		if total <= maxScratchpadBytes {
+			break
+		}
+		if err := os.Remove(file.path); err != nil {
+			return err
+		}
+		total -= file.size
 	}
 	return nil
 }
@@ -267,7 +330,10 @@ func estimateTokens(text string) int {
 }
 
 func truncateTokens(text string, budget int) string {
-	if budget <= 0 || estimateTokens(text) <= budget {
+	if budget <= 0 {
+		return ""
+	}
+	if estimateTokens(text) <= budget {
 		return text
 	}
 	runes := []rune(text)
@@ -276,6 +342,21 @@ func truncateTokens(text string, budget int) string {
 		limit = len(runes)
 	}
 	return string(runes[:limit]) + "\n[truncated]"
+}
+
+func truncateTailTokens(text string, budget int) string {
+	if budget <= 0 {
+		return ""
+	}
+	if estimateTokens(text) <= budget {
+		return text
+	}
+	runes := []rune(text)
+	limit := budget * 4
+	if limit > len(runes) {
+		limit = len(runes)
+	}
+	return "[earlier progress truncated]\n" + string(runes[len(runes)-limit:])
 }
 
 func safeSessionID(id string) string {
