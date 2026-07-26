@@ -1,10 +1,9 @@
 package prompts
 
 import (
+	"embed"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -13,8 +12,11 @@ import (
 
 var systemTemplates = [...]string{"system", "coding", "tools", "planner", "response"}
 
+//go:embed templates/system.md templates/coding.md templates/tools.md templates/planner.md templates/response.md
+var templateFiles embed.FS
+
 // LoadSystem reads the fixed system templates once during application startup.
-func LoadSystem(templateDir string, registry *tools.Registry) (string, error) {
+func LoadSystem(registry *tools.Registry) (string, error) {
 	toolDocs, err := generateToolDocs(registry)
 	if err != nil {
 		return "", err
@@ -22,7 +24,7 @@ func LoadSystem(templateDir string, registry *tools.Registry) (string, error) {
 
 	var prompt strings.Builder
 	for i, name := range systemTemplates {
-		content, err := os.ReadFile(filepath.Join(templateDir, name+".md"))
+		content, err := templateFiles.ReadFile("templates/" + name + ".md")
 		if err != nil {
 			return "", fmt.Errorf("read system template %q: %w", name, err)
 		}

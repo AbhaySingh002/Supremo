@@ -33,8 +33,8 @@ type RealContextBuilder struct {
 }
 
 // NewRealContextBuilder creates a new RealContextBuilder.
-func NewRealContextBuilder(templateDir string, registry *tools.Registry, memory Memory) (*RealContextBuilder, error) {
-	system, err := prompts.LoadSystem(templateDir, registry)
+func NewRealContextBuilder(registry *tools.Registry, memory Memory) (*RealContextBuilder, error) {
+	system, err := prompts.LoadSystem(registry)
 	if err != nil {
 		return nil, err
 	}

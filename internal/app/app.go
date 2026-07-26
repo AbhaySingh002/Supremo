@@ -89,7 +89,7 @@ func New() (*App, error) {
 
 	// 7. Load the fixed prompt templates once.
 	fmt.Println("Initializing Prompt System...")
-	contextBuilder, err := agent.NewRealContextBuilder("internal/prompts/templates", registry, memory)
+	contextBuilder, err := agent.NewRealContextBuilder(registry, memory)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load prompts: %w", err)
 	}

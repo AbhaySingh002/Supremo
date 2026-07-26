@@ -2,8 +2,6 @@ package prompts
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -18,22 +16,15 @@ func (testTool) Schema() any                                             { retur
 func (testTool) Execute(context.Context, any) (*tools.ToolResult, error) { return nil, nil }
 
 func TestLoadSystem(t *testing.T) {
-	dir := t.TempDir()
-	for _, name := range systemTemplates {
-		if err := os.WriteFile(filepath.Join(dir, name+".md"), []byte(name), 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-
 	registry := tools.NewRegistry()
 	if err := registry.Register(testTool{}); err != nil {
 		t.Fatal(err)
 	}
-	prompt, err := LoadSystem(dir, registry)
+	prompt, err := LoadSystem(registry)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(prompt, "system\ncoding\ntools\n# Available Tools") || !strings.Contains(prompt, "## test") {
+	if !strings.Contains(prompt, "# System Instructions") || !strings.Contains(prompt, "## test") {
 		t.Fatalf("unexpected prompt: %q", prompt)
 	}
 }
