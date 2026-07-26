@@ -18,6 +18,31 @@ try {
   Expand-Archive (Join-Path $temp $asset) -DestinationPath $temp -Force
   Copy-Item (Join-Path $temp "supremo.exe") (Join-Path $destination "supremo.exe") -Force
   Write-Output "Installed Supremo to $destination\supremo.exe"
+
+  # Add to PATH automatically
+  function Setup-Path {
+    $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    
+    # Check if already in PATH
+    if ($currentPath -like "*$destination*") {
+      Write-Output "PATH already configured. You can run: supremo"
+      return
+    }
+
+    Write-Output "Adding $destination to PATH..."
+    
+    # Add to user PATH
+    [Environment]::SetEnvironmentVariable("Path", "$currentPath;$destination", "User")
+    
+    # Update current session
+    $env:Path = [Environment]::GetEnvironmentVariable("Path", "User") + ";" + [Environment]::GetEnvironmentVariable("Path", "Machine")
+    
+    Write-Output "PATH configured. Restart your terminal or run:"
+    Write-Output "  `$env:Path = `"$destination;`$env:Path`""
+    Write-Output "Then run: supremo"
+  }
+
+  Setup-Path
 } finally {
   Remove-Item $temp -Recurse -Force
 }
