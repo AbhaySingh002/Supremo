@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -18,13 +17,7 @@ type Credentials struct {
 	APIKeys map[string]string `json:"api_keys"`
 }
 
-// CredentialStore defines the interface for key managers.
-type CredentialStore interface {
-	GetAPIKey(ctx context.Context, provider string) (string, error)
-	SetAPIKey(ctx context.Context, provider string, apiKey string) error
-}
-
-// FileCredentialStore implements CredentialStore using local JSON serialization.
+// FileCredentialStore persists provider API keys in local JSON.
 type FileCredentialStore struct {
 	mu       sync.Mutex
 	filePath string
@@ -38,7 +31,7 @@ func NewFileCredentialStore(dir string) *FileCredentialStore {
 }
 
 // GetAPIKey reads the key for a provider.
-func (s *FileCredentialStore) GetAPIKey(ctx context.Context, provider string) (string, error) {
+func (s *FileCredentialStore) GetAPIKey(provider string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -55,7 +48,7 @@ func (s *FileCredentialStore) GetAPIKey(ctx context.Context, provider string) (s
 }
 
 // SetAPIKey writes the key for a provider.
-func (s *FileCredentialStore) SetAPIKey(ctx context.Context, provider string, apiKey string) error {
+func (s *FileCredentialStore) SetAPIKey(provider string, apiKey string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

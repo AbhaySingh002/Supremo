@@ -14,15 +14,6 @@ type Observation struct {
 	Output   string `json:"output"`
 }
 
-// observationPayload is the structured JSON sent to the LLM as tool output.
-type observationPayload struct {
-	Tool    string                 `json:"tool"`
-	Success bool                   `json:"success"`
-	Message string                 `json:"message"`
-	Data    map[string]interface{} `json:"data,omitempty"`
-	Error   string                 `json:"error,omitempty"`
-}
-
 // NewObservation converts a ToolResult or an execution error into a standard Observation.
 func NewObservation(toolName string, result *tools.ToolResult, err error) Observation {
 	if err != nil {
@@ -35,7 +26,13 @@ func NewObservation(toolName string, result *tools.ToolResult, err error) Observ
 }
 
 func buildObservation(toolName string, success bool, message string, data map[string]interface{}, err error) Observation {
-	payload := observationPayload{
+	payload := struct {
+		Tool    string                 `json:"tool"`
+		Success bool                   `json:"success"`
+		Message string                 `json:"message"`
+		Data    map[string]interface{} `json:"data,omitempty"`
+		Error   string                 `json:"error,omitempty"`
+	}{
 		Tool:    toolName,
 		Success: success,
 		Message: message,

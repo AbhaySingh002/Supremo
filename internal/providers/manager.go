@@ -12,18 +12,13 @@ import (
 type Manager struct {
 	mu            sync.RWMutex
 	configDir     string
-	credStore     CredentialStore
-	factory       ProviderFactory
+	credStore     *FileCredentialStore
 	runtimeConfig *RuntimeConfig
 }
 
 // NewManager constructs a new Provider Manager.
-func NewManager(configDir string, credStore CredentialStore, factory ProviderFactory) *Manager {
-	return &Manager{
-		configDir: configDir,
-		credStore: credStore,
-		factory:   factory,
-	}
+func NewManager(configDir string, credStore *FileCredentialStore) *Manager {
+	return &Manager{configDir: configDir, credStore: credStore}
 }
 
 // Initialize configures files, pulls keys, and sets runtime configs on boot.
@@ -34,20 +29,15 @@ func (m *Manager) Initialize(ctx context.Context) error {
 	if err := EnsureConfigDir(m.configDir); err != nil {
 		return fmt.Errorf("failed to configure dir: %w", err)
 	}
-
 	cfg, err := LoadConfig(m.configDir)
 	if err != nil {
 		return fmt.Errorf("failed to load configs: %w", err)
 	}
-
-	apiKey, _ := m.credStore.GetAPIKey(ctx, cfg.ProviderName)
-
-	client, err := m.factory.Create(ctx, cfg.ProviderName, cfg.Model, cfg.Endpoint, apiKey)
+	apiKey, _ := m.credStore.GetAPIKey(cfg.ProviderName)
+	client, err := NewProvider(ctx, cfg.ProviderName, cfg.Model, cfg.Endpoint, apiKey)
 	if err != nil {
-		// Proceed with a nil client if client initialization fails (e.g. missing API key)
 		client = nil
 	}
-
 	m.runtimeConfig = NewRuntimeConfig(cfg.ProviderName, cfg.Model, cfg.Endpoint, apiKey, client)
 	return nil
 }
@@ -69,8 +59,8 @@ func (m *Manager) Chat(ctx context.Context, prompt *models.Prompt) (*Completion,
 	return client.Chat(ctx, prompt)
 }
 
-// UpdateModel updates model settings.
-func (m *Manager) UpdateModel(ctx context.Context, model string) error {
+// update applies a setting, persists it, and restores both on client creation failure.
+func (m *Manager) update(ctx context.Context, change func(), persist func() error) error {
 	if m.runtimeConfig == nil {
 		return fmt.Errorf("manager not initialized")
 	}
@@ -78,171 +68,63 @@ func (m *Manager) UpdateModel(ctx context.Context, model string) error {
 	m.runtimeConfig.mu.Lock()
 	defer m.runtimeConfig.mu.Unlock()
 
-	origProvider := m.runtimeConfig.providerName
-	origModel := m.runtimeConfig.model
-	origEndpoint := m.runtimeConfig.endpoint
+	previousProvider := m.runtimeConfig.providerName
+	previousModel := m.runtimeConfig.model
+	previousEndpoint := m.runtimeConfig.endpoint
+	previousAPIKey := m.runtimeConfig.apiKey
+	restore := func() {
+		m.runtimeConfig.providerName = previousProvider
+		m.runtimeConfig.model = previousModel
+		m.runtimeConfig.endpoint = previousEndpoint
+		m.runtimeConfig.apiKey = previousAPIKey
+	}
 
-	// 1. Update RuntimeConfig
-	m.runtimeConfig.model = model
+	change()
+	if err := persist(); err != nil {
+		restore()
+		return err
+	}
+	client, err := NewProvider(ctx, m.runtimeConfig.providerName, m.runtimeConfig.model, m.runtimeConfig.endpoint, m.runtimeConfig.apiKey)
+	if err != nil {
+		restore()
+		_ = persist()
+		return fmt.Errorf("failed to rebuild provider client: %w", err)
+	}
+	m.runtimeConfig.activeClient = client
+	return nil
+}
 
-	// 2. Persist Config
-	cfg := &Config{
+func (m *Manager) saveConfig() error {
+	return SaveConfig(m.configDir, &Config{
 		ProviderName: m.runtimeConfig.providerName,
 		Model:        m.runtimeConfig.model,
 		Endpoint:     m.runtimeConfig.endpoint,
-	}
-	if err := SaveConfig(m.configDir, cfg); err != nil {
-		m.runtimeConfig.model = origModel
-		return err
-	}
+	})
+}
 
-	// 3. Recreate Gemini Client
-	client, err := m.factory.Create(ctx, m.runtimeConfig.providerName, m.runtimeConfig.model, m.runtimeConfig.endpoint, m.runtimeConfig.apiKey)
-	if err != nil {
-		m.runtimeConfig.model = origModel
-		rollbackCfg := &Config{
-			ProviderName: origProvider,
-			Model:        origModel,
-			Endpoint:     origEndpoint,
-		}
-		_ = SaveConfig(m.configDir, rollbackCfg)
-		return fmt.Errorf("failed to rebuild provider client: %w", err)
-	}
-
-	// 4. Swap Client Atomically
-	m.runtimeConfig.activeClient = client
-	return nil
+// UpdateModel updates model settings.
+func (m *Manager) UpdateModel(ctx context.Context, model string) error {
+	return m.update(ctx, func() { m.runtimeConfig.model = model }, m.saveConfig)
 }
 
 // UpdateEndpoint updates endpoints.
 func (m *Manager) UpdateEndpoint(ctx context.Context, endpoint string) error {
-	if m.runtimeConfig == nil {
-		return fmt.Errorf("manager not initialized")
-	}
-
-	m.runtimeConfig.mu.Lock()
-	defer m.runtimeConfig.mu.Unlock()
-
-	origProvider := m.runtimeConfig.providerName
-	origModel := m.runtimeConfig.model
-	origEndpoint := m.runtimeConfig.endpoint
-
-	// 1. Update RuntimeConfig
-	m.runtimeConfig.endpoint = endpoint
-
-	// 2. Persist Config
-	cfg := &Config{
-		ProviderName: m.runtimeConfig.providerName,
-		Model:        m.runtimeConfig.model,
-		Endpoint:     m.runtimeConfig.endpoint,
-	}
-	if err := SaveConfig(m.configDir, cfg); err != nil {
-		m.runtimeConfig.endpoint = origEndpoint
-		return err
-	}
-
-	// 3. Recreate Gemini Client
-	client, err := m.factory.Create(ctx, m.runtimeConfig.providerName, m.runtimeConfig.model, m.runtimeConfig.endpoint, m.runtimeConfig.apiKey)
-	if err != nil {
-		m.runtimeConfig.endpoint = origEndpoint
-		rollbackCfg := &Config{
-			ProviderName: origProvider,
-			Model:        origModel,
-			Endpoint:     origEndpoint,
-		}
-		_ = SaveConfig(m.configDir, rollbackCfg)
-		return fmt.Errorf("failed to rebuild provider client: %w", err)
-	}
-
-	// 4. Swap Client Atomically
-	m.runtimeConfig.activeClient = client
-	return nil
+	return m.update(ctx, func() { m.runtimeConfig.endpoint = endpoint }, m.saveConfig)
 }
 
 // UpdateAPIKey updates provider API key.
 func (m *Manager) UpdateAPIKey(ctx context.Context, apiKey string) error {
-	if m.runtimeConfig == nil {
-		return fmt.Errorf("manager not initialized")
-	}
-
-	m.runtimeConfig.mu.Lock()
-	defer m.runtimeConfig.mu.Unlock()
-
-	origProvider := m.runtimeConfig.providerName
-	origAPIKey := m.runtimeConfig.apiKey
-
-	// 1. Update RuntimeConfig
-	m.runtimeConfig.apiKey = apiKey
-
-	// 2. Persist Credentials
-	if err := m.credStore.SetAPIKey(ctx, m.runtimeConfig.providerName, apiKey); err != nil {
-		m.runtimeConfig.apiKey = origAPIKey
-		return err
-	}
-
-	// 3. Recreate Gemini Client
-	client, err := m.factory.Create(ctx, m.runtimeConfig.providerName, m.runtimeConfig.model, m.runtimeConfig.endpoint, m.runtimeConfig.apiKey)
-	if err != nil {
-		m.runtimeConfig.apiKey = origAPIKey
-		_ = m.credStore.SetAPIKey(ctx, origProvider, origAPIKey)
-		return fmt.Errorf("failed to rebuild provider client: %w", err)
-	}
-
-	// 4. Swap Client Atomically
-	m.runtimeConfig.activeClient = client
-	return nil
+	return m.update(ctx, func() { m.runtimeConfig.apiKey = apiKey }, func() error {
+		return m.credStore.SetAPIKey(m.runtimeConfig.providerName, m.runtimeConfig.apiKey)
+	})
 }
 
 // UpdateProvider switches active provider.
 func (m *Manager) UpdateProvider(ctx context.Context, providerName string) error {
-	if m.runtimeConfig == nil {
-		return fmt.Errorf("manager not initialized")
-	}
-
-	m.runtimeConfig.mu.Lock()
-	defer m.runtimeConfig.mu.Unlock()
-
-	origProvider := m.runtimeConfig.providerName
-	origModel := m.runtimeConfig.model
-	origEndpoint := m.runtimeConfig.endpoint
-	origAPIKey := m.runtimeConfig.apiKey
-
-	// Load api key for new provider
-	apiKey, _ := m.credStore.GetAPIKey(ctx, providerName)
-
-	// 1. Update RuntimeConfig
-	m.runtimeConfig.providerName = providerName
-	m.runtimeConfig.apiKey = apiKey
-
-	// 2. Persist Config
-	cfg := &Config{
-		ProviderName: m.runtimeConfig.providerName,
-		Model:        m.runtimeConfig.model,
-		Endpoint:     m.runtimeConfig.endpoint,
-	}
-	if err := SaveConfig(m.configDir, cfg); err != nil {
-		m.runtimeConfig.providerName = origProvider
-		m.runtimeConfig.apiKey = origAPIKey
-		return err
-	}
-
-	// 3. Recreate Gemini Client
-	client, err := m.factory.Create(ctx, m.runtimeConfig.providerName, m.runtimeConfig.model, m.runtimeConfig.endpoint, m.runtimeConfig.apiKey)
-	if err != nil {
-		m.runtimeConfig.providerName = origProvider
-		m.runtimeConfig.apiKey = origAPIKey
-		rollbackCfg := &Config{
-			ProviderName: origProvider,
-			Model:        origModel,
-			Endpoint:     origEndpoint,
-		}
-		_ = SaveConfig(m.configDir, rollbackCfg)
-		return fmt.Errorf("failed to rebuild provider client: %w", err)
-	}
-
-	// 4. Swap Client Atomically
-	m.runtimeConfig.activeClient = client
-	return nil
+	return m.update(ctx, func() {
+		m.runtimeConfig.providerName = providerName
+		m.runtimeConfig.apiKey, _ = m.credStore.GetAPIKey(providerName)
+	}, m.saveConfig)
 }
 
 // GetRuntimeConfig retrieves the active runtime configurations.

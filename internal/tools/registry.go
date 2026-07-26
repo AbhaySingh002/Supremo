@@ -36,3 +36,12 @@ func (r *Registry) Get(name string) (Tool, error) {
 
 	return tool, nil
 }
+
+// All returns the registered tools.
+func (r *Registry) All() []Tool {
+	all := make([]Tool, 0, len(r.tools))
+	for _, tool := range r.tools {
+		all = append(all, tool)
+	}
+	return all
+}

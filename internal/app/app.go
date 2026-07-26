@@ -3,11 +3,9 @@ package app
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/AbhaySingh002/supremo/internal/agent"
 	"github.com/AbhaySingh002/supremo/internal/parser"
-	"github.com/AbhaySingh002/supremo/internal/prompts"
 	"github.com/AbhaySingh002/supremo/internal/providers"
 	"github.com/AbhaySingh002/supremo/internal/tools"
 	"github.com/AbhaySingh002/supremo/internal/tools/file_system"
@@ -24,15 +22,6 @@ type App struct {
 	ToolManager     *tools.Manager
 }
 
-// RuntimeManager is a simple implementation of agent.RuntimeManager.
-type RuntimeManager struct{}
-
-// GetWorkingDirectory implements agent.RuntimeManager
-func (r *RuntimeManager) GetWorkingDirectory() string {
-	dir, _ := os.Getwd()
-	return dir
-}
-
 // New constructs the application, initializing and wiring together all subsystems.
 func New() (*App, error) {
 	ctx := context.Background()
@@ -42,8 +31,7 @@ func New() (*App, error) {
 	configDir := ".supremo"
 
 	credStore := providers.NewFileCredentialStore(configDir)
-	factory := providers.NewFactory()
-	providerManager := providers.NewManager(configDir, credStore, factory)
+	providerManager := providers.NewManager(configDir, credStore)
 
 	if err := providerManager.Initialize(ctx); err != nil {
 		return nil, fmt.Errorf("failed to initialize provider manager: %w", err)
@@ -85,30 +73,26 @@ func New() (*App, error) {
 	// 4. Create Tool Manager
 	toolManager := tools.NewManager(registry)
 
-	// 5. Initialize Prompt System
-	fmt.Println("Initializing Prompt System...")
-	promptLoader := prompts.NewLoader("internal/prompts/templates")
-	promptRegistry := prompts.NewRegistry()
-	promptBuilder := prompts.NewBuilder(promptLoader, promptRegistry, registry)
-
-	// 6. Initialize Parser
+	// 5. Initialize Parser
 	defaultParser := parser.NewParser()
 
-	// 7. Initialize Memory
+	// 6. Initialize Memory
 	memory := agent.NewInMemoryMemory()
 
-	// 8. Initialize Context Builder with real implementation
-	runtimeManager := &RuntimeManager{}
-	contextBuilder := agent.NewRealContextBuilder(promptBuilder, runtimeManager, memory)
+	// 7. Load the fixed prompt templates once.
+	fmt.Println("Initializing Prompt System...")
+	contextBuilder, err := agent.NewRealContextBuilder("internal/prompts/templates", registry, memory)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load prompts: %w", err)
+	}
 
-	// 9. Get the active provider & Construct Agent using dependency injection.
+	// 8. Get the active provider & construct the Agent.
 	fmt.Println("Initializing Agent...")
 	appAgent := agent.NewAgent(
 		providerManager,
 		toolManager,
 		defaultParser,
 		contextBuilder,
-		runtimeManager,
 		memory,
 	)
 

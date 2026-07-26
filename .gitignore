@@ -29,8 +29,13 @@ go.work.sum
 
 # Editor/IDE
 # .idea/
+.agents/
+skills-lock.json
 # .vscode/
 .DS_Store
 
 AGENTS.md
 .supremo
+.claude/
+.vscode
+landing-page

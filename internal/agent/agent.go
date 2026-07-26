@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"time"
 
 	"github.com/AbhaySingh002/supremo/internal/models"
 	"github.com/AbhaySingh002/supremo/internal/parser"
@@ -34,12 +33,10 @@ type ContextBuilder interface {
 type Memory interface {
 	Append(ctx context.Context, sessionID string, msg models.Message) error
 	Get(ctx context.Context, sessionID string) ([]models.Message, error)
+	GetWindow(ctx context.Context, sessionID string, messageBudget, toolBudget int) ([]models.Message, error)
+	GetSummary(ctx context.Context, sessionID string, budget int) (string, error)
+	PersistentContext(budget int) (string, error)
 	Clear(ctx context.Context, sessionID string) error
-}
-
-// RuntimeManager defines the interface for managing workspace configurations/environment.
-type RuntimeManager interface {
-	GetWorkingDirectory() string
 }
 
 // Agent coordinates the execution of the ReAct loop across different subsystems.
@@ -48,7 +45,6 @@ type Agent struct {
 	toolManager    *tools.Manager
 	parser         Parser
 	contextBuilder ContextBuilder
-	runtimeManager RuntimeManager
 	memory         Memory
 	debug          bool
 }
@@ -59,7 +55,6 @@ func NewAgent(
 	toolManager *tools.Manager,
 	parser Parser,
 	contextBuilder ContextBuilder,
-	runtimeManager RuntimeManager,
 	memory Memory,
 ) *Agent {
 	return &Agent{
@@ -67,7 +62,6 @@ func NewAgent(
 		toolManager:    toolManager,
 		parser:         parser,
 		contextBuilder: contextBuilder,
-		runtimeManager: runtimeManager,
 		memory:         memory,
 	}
 }
@@ -83,24 +77,16 @@ func (a *Agent) SetDebug(enabled bool) {
 }
 
 // executeAll runs all tool calls in a parsed response sequentially, stopping on first error.
-func (a *Agent) executeAll(ctx context.Context, resp *parser.Response, stream EventStream) ([]Observation, error) {
+func (a *Agent) executeAll(ctx context.Context, resp *parser.Response) ([]Observation, error) {
 	if resp == nil || len(resp.ToolCalls) == 0 {
 		return nil, nil
 	}
 
 	var observations []Observation
 	for _, tc := range resp.ToolCalls {
-		if stream != nil {
-			stream.Emit(Event{Type: EventToolStarted, Payload: tc.Name, Timestamp: time.Now()})
-		}
-
 		res, err := a.toolManager.Execute(ctx, tc.Name, tc.Arguments)
 		obs := NewObservation(tc.Name, res, err)
 		observations = append(observations, obs)
-
-		if stream != nil {
-			stream.Emit(Event{Type: EventToolFinished, Payload: obs, Timestamp: time.Now()})
-		}
 
 		if err != nil || !obs.Success {
 			break

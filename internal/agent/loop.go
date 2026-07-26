@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/AbhaySingh002/supremo/internal/models"
 )
@@ -13,7 +12,6 @@ func (a *Agent) Run(
 	ctx context.Context,
 	session *Session,
 	userInput string,
-	stream EventStream,
 ) (string, error) {
 
 	state := &State{
@@ -58,13 +56,7 @@ func (a *Agent) Run(
 			}
 		}
 
-		// 2. Stream Thinking event
-		stream.Emit(Event{
-			Type:      EventThinking,
-			Timestamp: time.Now(),
-		})
-
-		// 3. Provider Call
+		// 2. Provider Call
 		completion, err := a.provider.Chat(ctx, prompt)
 		if err != nil {
 			state.LastError = err
@@ -104,15 +96,15 @@ func (a *Agent) Run(
 			}
 		}
 
-		// 5. Execute Tool Calls if present
+		// 4. Execute Tool Calls if present
 		if len(parsed.ToolCalls) > 0 {
-			observations, execErr := a.executeAll(ctx, parsed, stream)
+			observations, execErr := a.executeAll(ctx, parsed)
 			if execErr != nil {
 				state.LastError = execErr
 				return "", execErr
 			}
 
-				for i, obs := range observations {
+			for i, obs := range observations {
 				if a.debug {
 					fmt.Printf("[DEBUG] OBSERVATION[%d] (%s):\n%s\n", i, obs.ToolName, obs.Output)
 				}
@@ -129,15 +121,9 @@ func (a *Agent) Run(
 			continue
 		}
 
-		// 6. Handle Final Response
+		// 5. Handle Final Response
 		if parsed.FinalAnswer != "" {
 			state.Finished = true
-
-			stream.Emit(Event{
-				Type:      EventFinalResponse,
-				Payload:   parsed.FinalAnswer,
-				Timestamp: time.Now(),
-			})
 
 			return parsed.FinalAnswer, nil
 		}

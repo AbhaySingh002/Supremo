@@ -14,11 +14,6 @@ import (
 	"github.com/AbhaySingh002/supremo/internal/commands"
 )
 
-// CLIStream handles the events emitted by the agent during the Run loop.
-type CLIStream struct{}
-
-func (s *CLIStream) Emit(event agent.Event) {}
-
 func main() {
 	debug := len(os.Args) > 1 && os.Args[1] == "--debug"
 
@@ -42,7 +37,6 @@ func main() {
 	defer stop()
 
 	session := &agent.Session{ID: "cli-session"}
-	stream := &CLIStream{}
 	cmdRegistry := commands.NewRegistry()
 
 	//  stdin read runs in goroutine so Ctrl+C cancels ctx and exits, not kills
@@ -93,7 +87,7 @@ func main() {
 				continue
 			}
 
-			response, err := application.Agent.Run(ctx, session, input, stream)
+			response, err := application.Agent.Run(ctx, session, input)
 			if err != nil {
 				if ctx.Err() != nil {
 					fmt.Println("\nInterrupted.")
