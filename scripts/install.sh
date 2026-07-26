@@ -2,10 +2,9 @@
 set -eu
 
 repo="AbhaySingh002/Supremo"
-api="https://api.github.com/repos/$repo/releases/latest"
 version="${SUPREMO_VERSION:-}"
 if [ -z "$version" ]; then
-  version=$(curl -fsSL "$api" | sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p')
+  version=$(curl -fsSL "https://raw.githubusercontent.com/$repo/main/VERSION")
 fi
 [ -n "$version" ] || { echo "Could not find the latest Supremo release." >&2; exit 1; }
 

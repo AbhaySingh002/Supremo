@@ -1,11 +1,10 @@
 $ErrorActionPreference = "Stop"
 $repo = "AbhaySingh002/Supremo"
-$release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
-$version = $release.tag_name
+$version = (Invoke-RestMethod "https://raw.githubusercontent.com/$repo/main/VERSION").Trim()
 $asset = "supremo_${version}_windows_amd64.zip"
-$checksum = ($release.assets | Where-Object name -eq "checksums.txt").browser_download_url
-$archive = ($release.assets | Where-Object name -eq $asset).browser_download_url
-if (-not $archive -or -not $checksum) { throw "Release $version does not contain a Windows archive." }
+$base = "https://github.com/$repo/releases/download/$version"
+$checksum = "$base/checksums.txt"
+$archive = "$base/$asset"
 
 $temp = New-Item -ItemType Directory -Path (Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid()))
 try {
