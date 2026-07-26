@@ -55,7 +55,11 @@ func generateToolDocs(registry *tools.Registry) (string, error) {
 		if docs.Len() == 0 {
 			docs.WriteString("# Available Tools\n")
 		}
-		fmt.Fprintf(&docs, "\n## %s\n\n%s\n\nArguments:\n```json\n%s\n```\n\nUsage Notes:\n- Use arguments conforming strictly to the JSON Schema.\n", tool.Name(), tool.Description(), schema)
+		safety := "read-only"
+		if tools.RequiresApproval(tool.Name()) {
+			safety = "requires explicit user approval"
+		}
+		fmt.Fprintf(&docs, "\n## %s\n\n%s\n\nSafety: %s.\n\nArguments:\n```json\n%s\n```\n\nUsage Notes:\n- Use arguments conforming strictly to the JSON Schema.\n", tool.Name(), tool.Description(), safety, schema)
 	}
 	return docs.String(), nil
 }

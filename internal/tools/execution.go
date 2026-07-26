@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 type contextKey string
@@ -61,12 +62,21 @@ type approvalRequest struct {
 	decision chan error
 }
 
-func isMutating(name string) bool {
+// RequiresApproval reports whether a tool can change the workspace or run arbitrary code.
+func RequiresApproval(name string) bool {
 	switch name {
 	case "create_directory", "create_file", "delete_file", "rename_file", "write_file", "run_formatter", "execute_command":
 		return true
 	}
 	return false
+}
+
+// Activity is one recent tool execution, retained only for the interactive session.
+type Activity struct {
+	Time    time.Time
+	Tool    string
+	Status  string
+	Message string
 }
 
 func renderToolCall(name string, input any) string {

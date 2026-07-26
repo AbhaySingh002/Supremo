@@ -45,6 +45,10 @@ func TestManagerMutationNeedsApproval(t *testing.T) {
 	if err := <-result; err != nil || write.calls != 1 {
 		t.Fatalf("approved tool result: err=%v calls=%d", err, write.calls)
 	}
+	activity := manager.Recent()
+	if len(activity) != 3 || activity[0].Status != "waiting approval" || activity[1].Status != "approved" || activity[2].Status != "completed" {
+		t.Fatalf("unexpected approval activity: %#v", activity)
+	}
 }
 
 func TestManagerDryRunAndDeny(t *testing.T) {
@@ -120,5 +124,21 @@ func TestManagerCancellationReleasesApproval(t *testing.T) {
 	cancel()
 	if err := <-done; err != context.Canceled || write.calls != 0 {
 		t.Fatalf("canceled tool result: err=%v calls=%d", err, write.calls)
+	}
+}
+
+func TestManagerRecordsRecentActivity(t *testing.T) {
+	read := &managerTestTool{name: "read_file"}
+	registry := NewRegistry()
+	if err := registry.Register(read); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(registry)
+	if _, err := manager.Execute(context.Background(), "read_file", nil); err != nil {
+		t.Fatal(err)
+	}
+	activity := manager.Recent()
+	if len(activity) != 1 || activity[0].Tool != "read_file" || activity[0].Status != "completed" {
+		t.Fatalf("unexpected activity: %#v", activity)
 	}
 }

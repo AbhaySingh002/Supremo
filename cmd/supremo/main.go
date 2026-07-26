@@ -14,7 +14,13 @@ import (
 	"github.com/AbhaySingh002/supremo/internal/commands"
 )
 
+var version = "dev"
+
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "version") {
+		fmt.Println("supremo", version)
+		return
+	}
 	debug := len(os.Args) > 1 && os.Args[1] == "--debug"
 
 	application, err := app.New()
@@ -163,5 +169,5 @@ func main() {
 }
 
 func isActiveControl(input string) bool {
-	return input == "/approve" || strings.HasPrefix(input, "/deny") || input == "/cancel" || input == "/exit" || input == "/help"
+	return input == "/approve" || strings.HasPrefix(input, "/deny") || input == "/cancel" || input == "/exit" || input == "/help" || input == "/tools" || input == "/activity"
 }

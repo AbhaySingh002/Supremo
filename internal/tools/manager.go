@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // Manager handles tool execution with validation and registry lookup.
@@ -12,6 +13,7 @@ type Manager struct {
 	mu       sync.Mutex
 	pending  *approvalRequest
 	report   func(string)
+	activity []Activity
 }
 
 // SetReporter emits compact execution status for interactive clients.
@@ -64,15 +66,33 @@ func (m *Manager) Execute(
 		return nil, err
 	}
 
-	if isMutating(name) {
+	if RequiresApproval(name) {
 		if IsDryRun(ctx) {
-			return BuildToolResult(true, "Dry run: would execute "+renderToolCall(name, input), nil), nil
+			result := BuildToolResult(true, "Dry run: would execute "+renderToolCall(name, input), nil)
+			m.record(name, "dry run", result.Message)
+			return result, nil
 		}
+		m.record(name, "waiting approval", "")
 		if err := m.waitForApproval(ctx, name, input); err != nil {
+			m.record(name, "denied", err.Error())
 			return nil, err
 		}
+		m.record(name, "approved", "")
 	}
-	return tool.Execute(ctx, input)
+	result, err := tool.Execute(ctx, input)
+	status := "completed"
+	message := ""
+	if result != nil {
+		message = result.Message
+	}
+	if err != nil || result == nil || !result.Success {
+		status = "failed"
+		if err != nil {
+			message = err.Error()
+		}
+	}
+	m.record(name, status, message)
+	return result, err
 }
 
 func (m *Manager) waitForApproval(ctx context.Context, name string, input any) error {
@@ -105,4 +125,22 @@ func (m *Manager) waitForApproval(ctx context.Context, name string, input any) e
 func (m *Manager) Has(name string) bool {
 	_, err := m.registry.Get(name)
 	return err == nil
+}
+
+// Recent returns the newest bounded set of local tool activity.
+func (m *Manager) Recent() []Activity {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	activity := make([]Activity, len(m.activity))
+	copy(activity, m.activity)
+	return activity
+}
+
+func (m *Manager) record(name, status, message string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.activity = append(m.activity, Activity{Time: time.Now().UTC(), Tool: name, Status: status, Message: message})
+	if len(m.activity) > 50 {
+		m.activity = m.activity[len(m.activity)-50:]
+	}
 }

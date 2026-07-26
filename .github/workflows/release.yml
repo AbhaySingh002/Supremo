@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build archives
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          mkdir dist
+          for target in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64; do
+            os=${target%_*}
+            arch=${target#*_}
+            name="supremo_${VERSION}_${os}_${arch}"
+            GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "dist/supremo" ./cmd/supremo
+            (cd dist && tar -czf "${name}.tar.gz" supremo)
+          done
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o dist/supremo.exe ./cmd/supremo
+          zip -j "dist/supremo_${VERSION}_windows_amd64.zip" dist/supremo.exe
+          rm dist/supremo dist/supremo.exe
+          (cd dist && sha256sum *.tar.gz *.zip > checksums.txt)
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.ref_name }}
+        run: gh release create "$VERSION" dist/* --generate-notes

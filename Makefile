@@ -6,18 +6,20 @@ ifeq ($(OS),Windows_NT)
     # Windows paths use backslashes for certain native shell commands
     TARGET_DIR=test_server
 else
-    BINARY=supremo
+BINARY=supremo
     RM=rm -f
     RMDIR=rm -rf
     TARGET_DIR=test_server
 endif
+
+VERSION ?= dev
 
 .PHONY: all build run test clean fmt precommit
 
 all: build
 
 build:
-	go build -o $(BINARY) cmd/supremo/main.go
+	go build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BINARY) cmd/supremo/main.go
 
 run:
 	go run cmd/supremo/main.go

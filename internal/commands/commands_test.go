@@ -14,15 +14,39 @@ import (
 func TestCommands_Registry(t *testing.T) {
 	r := NewRegistry()
 	list := r.List()
-	if len(list) != 13 {
-		t.Fatalf("expected 13 commands, got %d", len(list))
+	if len(list) != 17 {
+		t.Fatalf("expected 17 commands, got %d", len(list))
 	}
 
-	expectedNames := []string{"/help", "/clear", "/reset", "/krypton", "/plan", "/approve", "/deny", "/dry-run", "/cancel", "/auth", "/model", "/config", "/exit"}
+	expectedNames := []string{"/help", "/init", "/clear", "/reset", "/krypton", "/plan", "/approve", "/deny", "/dry-run", "/cancel", "/tools", "/activity", "/doctor", "/auth", "/model", "/config", "/exit"}
 	for i, cmd := range list {
 		if cmd.Name != expectedNames[i] {
 			t.Errorf("expected command %d to be %s, got %s", i, expectedNames[i], cmd.Name)
 		}
+	}
+}
+
+func TestCommands_InitCreatesWorkspaceMemory(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/test\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previous) })
+
+	output, handled, err := NewRegistry().Handle(context.Background(), nil, nil, "/init")
+	if err != nil || !handled || !strings.Contains(output, "initialized") {
+		t.Fatalf("unexpected init result: output=%q handled=%v err=%v", output, handled, err)
+	}
+	memory, err := os.ReadFile(filepath.Join(root, ".memory", "MEMORY.md"))
+	if err != nil || !strings.Contains(string(memory), "example.com/test") {
+		t.Fatalf("workspace memory was not created: %q, %v", memory, err)
 	}
 }
 

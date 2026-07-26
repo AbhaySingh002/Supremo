@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/AbhaySingh002/supremo/internal/agent"
 	"github.com/AbhaySingh002/supremo/internal/app"
+	"github.com/AbhaySingh002/supremo/internal/tools"
 )
 
 // ErrExit signals the application shell loop to terminate.
@@ -85,7 +88,19 @@ func NewRegistry() *Registry {
 		},
 	})
 
-	// 4. /plan
+	// 4. /init
+	r.Register(Command{
+		Name:        "/init",
+		Description: "Create local workspace memory",
+		Execute: func(_ context.Context, _ *app.App, _ *agent.Session, args []string) (string, error) {
+			if len(args) != 0 {
+				return "", fmt.Errorf("usage: /init")
+			}
+			return agent.InitializeWorkspace(".")
+		},
+	})
+
+	// 5. /krypton
 	r.Register(Command{
 		Name:        "/krypton",
 		Description: "Remove Supremo state from this workspace (keeps global credentials)",
@@ -111,7 +126,7 @@ func NewRegistry() *Registry {
 		},
 	})
 
-	// 5. /plan
+	// 6. /plan
 	r.Register(Command{
 		Name:        "/plan",
 		Description: "Toggle plan mode; status, show, or resume an active plan",
@@ -156,7 +171,7 @@ func NewRegistry() *Registry {
 		},
 	})
 
-	// 6. /approve
+	// 7. /approve
 	r.Register(Command{
 		Name:        "/approve",
 		Description: "Approve the pending mutating tool call",
@@ -171,7 +186,7 @@ func NewRegistry() *Registry {
 		},
 	})
 
-	// 7. /deny
+	// 8. /deny
 	r.Register(Command{
 		Name:        "/deny",
 		Description: "Deny the pending mutating tool call",
@@ -183,7 +198,7 @@ func NewRegistry() *Registry {
 		},
 	})
 
-	// 8. /dry-run
+	// 9. /dry-run
 	r.Register(Command{
 		Name:        "/dry-run",
 		Description: "Toggle dry run for mutating tool calls",
@@ -199,7 +214,7 @@ func NewRegistry() *Registry {
 		},
 	})
 
-	// 9. /cancel
+	// 10. /cancel
 	r.Register(Command{
 		Name:        "/cancel",
 		Description: "Cancel the active task",
@@ -214,7 +229,73 @@ func NewRegistry() *Registry {
 		},
 	})
 
-	// 10. /exit
+	// 11. /tools
+	r.Register(Command{
+		Name:        "/tools",
+		Description: "List tools and their approval policy",
+		Execute: func(_ context.Context, application *app.App, _ *agent.Session, args []string) (string, error) {
+			if len(args) != 0 {
+				return "", fmt.Errorf("usage: /tools")
+			}
+			if application == nil || application.Registry == nil {
+				return "", fmt.Errorf("tool registry is unavailable")
+			}
+			registered := application.Registry.All()
+			sort.Slice(registered, func(i, j int) bool { return registered[i].Name() < registered[j].Name() })
+			var output strings.Builder
+			output.WriteString("Tools:\n")
+			for _, tool := range registered {
+				policy := "read-only"
+				if tools.RequiresApproval(tool.Name()) {
+					policy = "approval required"
+				}
+				fmt.Fprintf(&output, "  %-20s %-18s %s\n", tool.Name(), policy, tool.Description())
+			}
+			return output.String(), nil
+		},
+	})
+
+	// 12. /activity
+	r.Register(Command{
+		Name:        "/activity",
+		Description: "Show recent local tool activity",
+		Execute: func(_ context.Context, application *app.App, _ *agent.Session, args []string) (string, error) {
+			if len(args) != 0 {
+				return "", fmt.Errorf("usage: /activity")
+			}
+			if application == nil || application.ToolManager == nil {
+				return "", fmt.Errorf("tool manager is unavailable")
+			}
+			activity := application.ToolManager.Recent()
+			if len(activity) == 0 {
+				return "No tool activity in this Supremo session.", nil
+			}
+			var output strings.Builder
+			output.WriteString("Recent tool activity:\n")
+			for _, entry := range activity {
+				fmt.Fprintf(&output, "- %s %s: %s", entry.Time.Format("15:04:05"), entry.Tool, entry.Status)
+				if entry.Message != "" {
+					fmt.Fprintf(&output, " (%s)", entry.Message)
+				}
+				output.WriteByte('\n')
+			}
+			return output.String(), nil
+		},
+	})
+
+	// 13. /doctor
+	r.Register(Command{
+		Name:        "/doctor",
+		Description: "Check local setup without calling the provider",
+		Execute: func(_ context.Context, application *app.App, _ *agent.Session, args []string) (string, error) {
+			if len(args) != 0 {
+				return "", fmt.Errorf("usage: /doctor")
+			}
+			return doctor(application)
+		},
+	})
+
+	// 14. /exit
 	r.Register(Command{
 		Name:        "/exit",
 		Description: "Exit the application",
@@ -223,7 +304,7 @@ func NewRegistry() *Registry {
 		},
 	})
 
-	// 11. /auth
+	// 15. /auth
 	r.Register(Command{
 		Name:        "/auth",
 		Description: "Update API key",
@@ -239,7 +320,7 @@ func NewRegistry() *Registry {
 		},
 	})
 
-	// 12. /model
+	// 16. /model
 	r.Register(Command{
 		Name:        "/model",
 		Description: "Change model (e.g. gemini-2.5-flash)",
@@ -254,7 +335,7 @@ func NewRegistry() *Registry {
 		},
 	})
 
-	// 13. /config
+	// 17. /config
 	r.Register(Command{
 		Name:        "/config",
 		Description: "View or reload configuration",
@@ -281,7 +362,7 @@ func (r *Registry) Register(cmd Command) {
 
 // List returns all registered commands sorted by name.
 func (r *Registry) List() []Command {
-	names := []string{"/help", "/clear", "/reset", "/krypton", "/plan", "/approve", "/deny", "/dry-run", "/cancel", "/auth", "/model", "/config", "/exit"}
+	names := []string{"/help", "/init", "/clear", "/reset", "/krypton", "/plan", "/approve", "/deny", "/dry-run", "/cancel", "/tools", "/activity", "/doctor", "/auth", "/model", "/config", "/exit"}
 	var list []Command
 	for _, name := range names {
 		if cmd, ok := r.commands[name]; ok {
@@ -289,6 +370,54 @@ func (r *Registry) List() []Command {
 		}
 	}
 	return list
+}
+
+func doctor(application *app.App) (string, error) {
+	root, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	var output strings.Builder
+	fmt.Fprintf(&output, "Supremo doctor\n- Workspace: %s\n", root)
+	probe, err := os.CreateTemp(root, ".supremo-doctor-*")
+	if err != nil {
+		fmt.Fprintf(&output, "- Workspace write: failed (%v)\n", err)
+	} else {
+		name := probe.Name()
+		err = probe.Close()
+		if removeErr := os.Remove(name); err == nil {
+			err = removeErr
+		}
+		if err != nil {
+			fmt.Fprintf(&output, "- Workspace write: failed (%v)\n", err)
+		} else {
+			output.WriteString("- Workspace write: ok\n")
+		}
+	}
+	for _, binary := range []string{"git", "go"} {
+		if _, err := exec.LookPath(binary); err != nil {
+			fmt.Fprintf(&output, "- %s: not found\n", binary)
+		} else {
+			fmt.Fprintf(&output, "- %s: found\n", binary)
+		}
+	}
+	if application == nil || application.ProviderManager == nil || application.ProviderManager.GetRuntimeConfig() == nil {
+		output.WriteString("- Provider: unavailable\n")
+	} else {
+		provider, model, _, apiKey, client := application.ProviderManager.GetRuntimeConfig().Get()
+		if apiKey == "" || apiKey == "YOUR_GEMINI_API_KEY" || client == nil {
+			fmt.Fprintf(&output, "- Provider: %s / %s needs an API key\n", provider, model)
+		} else {
+			fmt.Fprintf(&output, "- Provider: %s / %s configured\n", provider, model)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, ".githooks", "pre-commit")); err == nil {
+		output.WriteString("- Pre-commit hook: present\n")
+	} else {
+		output.WriteString("- Pre-commit hook: missing (run: git config core.hooksPath .githooks)\n")
+	}
+	output.WriteString("- Provider network access: not checked\n")
+	return output.String(), nil
 }
 
 // Handle processes the user input. If it is a command (starts with '/'), it executes it
