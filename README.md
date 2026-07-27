@@ -16,7 +16,7 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/AbhaySingh002/Supremo/main/scripts/install.ps1 | iex
 ```
 
-The installers verify the downloaded release checksum and automatically add Supremo to your PATH. Set `SUPREMO_INSTALL_DIR` to choose a destination; the default is `~/.local/bin`.
+The installers verify the downloaded release checksum and install Supremo to `~/.local/bin`. PowerShell updates PATH immediately; Unix installers add it to your shell profile automatically (open a new terminal after a first installation).
 
 If you already have Go, use:
 

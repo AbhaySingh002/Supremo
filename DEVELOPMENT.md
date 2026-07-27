@@ -20,3 +20,18 @@ git push origin main --follow-tags
 ```
 
 Pushing the tag starts the GitHub release workflow. It builds the archives and publishes the release; it does not write a follow-up commit.
+
+Installers read the latest tag from the raw `VERSION` file in `main`, then download the matching release asset and `checksums.txt`. The release workflow publishes Linux and macOS archives for amd64 and arm64, plus Windows ZIPs for amd64 and arm64.
+
+After the first tagged release, smoke test installers:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AbhaySingh002/Supremo/main/scripts/install.sh | sh
+# Open a new terminal if this was the first installation.
+supremo --version
+```
+
+```powershell
+irm https://raw.githubusercontent.com/AbhaySingh002/Supremo/main/scripts/install.ps1 | iex
+supremo --version
+```
