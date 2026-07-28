@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/AbhaySingh002/supremo/internal/models"
+	"github.com/AbhaySingh002/supremo/internal/parser/models"
 	"github.com/AbhaySingh002/supremo/internal/prompts"
 	"github.com/AbhaySingh002/supremo/internal/tools"
 )
@@ -42,9 +42,13 @@ func NewRealContextBuilder(registry *tools.Registry, memory Memory, contextLimit
 // Build implements agent.ContextBuilder.
 func (cb *RealContextBuilder) Build(ctx context.Context, session *Session) (*models.Prompt, error) {
 	promptBudget := maxPromptTokenBudget
-	if cb.contextLimit != nil && cb.contextLimit() > 0 && cb.contextLimit() < maxPromptTokenBudget {
+	contextLimit := 0
+	if cb.contextLimit != nil {
+		contextLimit = cb.contextLimit()
+	}
+	if contextLimit > 0 && contextLimit < maxPromptTokenBudget {
 		// Keep room for the model's response instead of filling its whole advertised context.
-		promptBudget = max(minPromptTokenBudget, cb.contextLimit()*3/4)
+		promptBudget = max(minPromptTokenBudget, contextLimit*3/4)
 	}
 	systemStateBudget := promptBudget * 30 / 100
 	messageWindowBudget := promptBudget * 50 / 100

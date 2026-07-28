@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/AbhaySingh002/supremo/internal/models"
+	"github.com/AbhaySingh002/supremo/internal/parser/models"
 )
 
 func TestMemoryPrunesAndRestoresWindow(t *testing.T) {

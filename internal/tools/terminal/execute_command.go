@@ -97,7 +97,11 @@ func (t *ExecuteCommand) Execute(ctx context.Context, input any) (*tools.ToolRes
 		return tools.BuildToolResult(false, "Workspace is required", nil), nil
 	}
 	if parsed.Directory != "" {
-		cmd.Dir = parsed.Directory
+		directory, err := tools.ValidateAndResolvePath(ctx, parsed.Directory)
+		if err != nil {
+			return tools.BuildToolResult(false, "Working directory must be inside the workspace", nil), nil
+		}
+		cmd.Dir = directory
 	}
 
 	// Execute command and capture output

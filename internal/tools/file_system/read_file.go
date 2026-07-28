@@ -64,11 +64,7 @@ func (t *ReadFile) Execute(ctx context.Context, input any) (*tools.ToolResult, e
 		return tools.BuildToolResult(false, "File does not exist", nil), nil
 	}
 
-	isDir, err := IsDirectory(absPath)
-	if err != nil {
-		return tools.BuildToolResult(false, "Failed to check path type: "+err.Error(), nil), nil
-	}
-	if isDir {
+	if info.IsDir() {
 		return tools.BuildToolResult(false, "Path is a directory, not a file", nil), nil
 	}
 

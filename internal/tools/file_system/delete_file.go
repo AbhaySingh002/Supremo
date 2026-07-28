@@ -60,15 +60,14 @@ func (t *DeleteFile) Execute(ctx context.Context, input any) (*tools.ToolResult,
 	}
 
 	// Check if path exists
-	_, err = tools.PathExists(absPath)
+	info, err := tools.PathExists(absPath)
 	if err != nil {
 		return tools.BuildToolResult(false, "Path does not exist", nil), nil
 	}
 
 	// Delete the file or directory
 	var deleteErr error
-	isDir, _ := IsDirectory(absPath)
-	if isDir {
+	if info.IsDir() {
 		deleteErr = os.RemoveAll(absPath)
 	} else {
 		deleteErr = os.Remove(absPath)

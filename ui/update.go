@@ -29,7 +29,6 @@ type commandResultMsg struct {
 	input   string
 	session agent.Session
 	output  string
-	handled bool
 	plan    *agent.Plan
 	err     error
 }

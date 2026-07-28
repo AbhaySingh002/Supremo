@@ -453,8 +453,7 @@ func TestStreamEntryFinalizesAndBridgePreservesBoundedEvents(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	bridge := newEventBridge(ctx)
-	bridge.limit = 1
+	bridge := newEventBridge(ctx, 1)
 	bridge.publish(agent.ProgressEvent{Message: "first"})
 	started, done := make(chan struct{}), make(chan struct{})
 	go func() {

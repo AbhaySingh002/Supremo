@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"math"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -182,7 +181,8 @@ func New(application *app.App, session *agent.Session, ctx context.Context, shut
 	input.BlurredStyle.Text = styles.text
 	input.BlurredStyle.Placeholder = styles.muted
 
-	items := commandItems()
+	registry := commands.NewRegistry()
+	items := commandItems(registry)
 	delegate := list.NewDefaultDelegate()
 	delegate.SetSpacing(0)
 	delegate.Styles.NormalTitle = styles.commandItem
@@ -203,7 +203,7 @@ func New(application *app.App, session *agent.Session, ctx context.Context, shut
 
 	m := Model{
 		application:    application,
-		registry:       commands.NewRegistry(),
+		registry:       registry,
 		ctx:            ctx,
 		shutdown:       shutdown,
 		workspace:      workspace,
@@ -221,7 +221,7 @@ func New(application *app.App, session *agent.Session, ctx context.Context, shut
 		spring:         harmonica.NewSpring(harmonica.FPS(30), 8, 1),
 	}
 	m.initialFocus = m.input.Focus()
-	m.bridge = newEventBridge(ctx)
+	m.bridge = newEventBridge(ctx, progressQueueCapacity)
 	if application != nil && application.Agent != nil {
 		application.Agent.SetProgress(m.bridge.publish)
 		m.debug = application.Agent.Debug()
@@ -231,10 +231,10 @@ func New(application *app.App, session *agent.Session, ctx context.Context, shut
 	return m
 }
 
-func commandItems() []list.Item {
-	registry := commands.NewRegistry()
-	items := make([]list.Item, 0, len(registry.List()))
-	for _, command := range registry.List() {
+func commandItems(registry *commands.Registry) []list.Item {
+	available := registry.List()
+	items := make([]list.Item, 0, len(available))
+	for _, command := range available {
 		items = append(items, commandItem{command: command})
 	}
 	return items
@@ -255,18 +255,18 @@ func (m *Model) refreshProvider() {
 }
 
 func (m *Model) layout() {
-	m.width = maxInt(1, m.width)
-	m.height = maxInt(1, m.height)
+	m.width = max(1, m.width)
+	m.height = max(1, m.height)
 	paletteHeight := 0
 	if m.paletteOpen {
-		paletteHeight = minInt(8, maxInt(3, m.height/3))
+		paletteHeight = min(8, max(3, m.height/3))
 	}
 	inputHeight := m.input.Height() + 3
-	bodyHeight := maxInt(1, m.height-3-inputHeight-paletteHeight)
+	bodyHeight := max(1, m.height-3-inputHeight-paletteHeight)
 	m.feed.Width = m.width
 	m.feed.Height = bodyHeight
-	m.input.SetWidth(maxInt(1, m.width-3))
-	m.palette.SetSize(maxInt(20, minInt(72, m.width-4)), paletteHeight)
+	m.input.SetWidth(max(1, m.width-3))
+	m.palette.SetSize(max(20, min(72, m.width-4)), paletteHeight)
 	m.rebuildFeed()
 }
 
@@ -277,7 +277,7 @@ func (m *Model) resetComposer() {
 }
 
 func (m *Model) resizeComposer() {
-	height := minInt(4, maxInt(1, strings.Count(m.input.Value(), "\n")+1))
+	height := min(4, max(1, strings.Count(m.input.Value(), "\n")+1))
 	if height == m.input.Height() {
 		return
 	}
@@ -332,7 +332,7 @@ func randomHeroAction(current int) int {
 }
 
 var heroActions = []string{
-	"Lasering", "Flying", "Helping", "Saving", "Punching", "Leaping", "Lifting", "Racing", "Shielding", "Rescuing", "Defending", "Protecting", "Smashing", "Zooming", "Dodging", "Blocking", "Striking", "Carrying", "Hovering", "Scanning", "Blasting", "Freezing", "Breathing", "Hearing", "Seeing", "Breaking", "Catching", "Stopping", "Turning", "Landing", "Soaring", "Diving", "Bursting", "Charging", "Grappling", "Overpowering", "Outrunning", "Withstanding", "Sacrificing", "Inspiring", "Leading", "Overcoming", "Crushing", "Hurling", "Tossing", "Navigating", "Traversing", "Pursuing", "Intercepting", "Fortifying", "Restoring", "Healing", "Rebuilding", "Championing", "Safeguarding",
+	"Lasering", "Flying", "Helping", "Saving", "Punching", "Leaping", "Lifting", "Racing", "Shielding", "Rescuing", "Defending", "Protecting", "Smashing", "Dodging", "Striking", "Carrying", "Hovering", "Scanning", "Landing", "Soaring", "Diving", "Bursting", "Charging", "Grappling", "Overpowering", "Outrunning", "Withstanding", "Sacrificing", "Inspiring", "Leading", "Overcoming", "Crushing", "Hurling", "Tossing", "Navigating", "Traversing", "Pursuing", "Intercepting", "Fortifying", "Restoring", "Healing", "Rebuilding", "Championing", "Safeguarding",
 }
 
 // heroSpinners rotate with the current action so active work remains visibly live.
@@ -503,12 +503,12 @@ func runAgentCmd(ctx context.Context, application *app.App, session agent.Sessio
 
 func runCommandCmd(ctx context.Context, registry *commands.Registry, application *app.App, session agent.Session, workspace, input string, id int) tea.Cmd {
 	return func() tea.Msg {
-		output, handled, err := registry.Handle(ctx, application, &session, input)
+		output, _, err := registry.Handle(ctx, application, &session, input)
 		var plan *agent.Plan
 		if session.CurrentPlanID != "" {
 			plan, _ = session.ActivePlan(workspace)
 		}
-		return commandResultMsg{id: id, input: input, session: session, output: output, handled: handled, plan: plan, err: err}
+		return commandResultMsg{id: id, input: input, session: session, output: output, plan: plan, err: err}
 	}
 }
 
@@ -555,12 +555,12 @@ func workspaceStatusCmd(ctx context.Context, workspace string) tea.Cmd {
 func markdownCmd(run, width int, entries []transcriptEntry) tea.Cmd {
 	return func() tea.Msg {
 		rendered := make(map[int]string)
+		renderer, err := glamour.NewTermRenderer(glamour.WithStandardStyle(glamourstyles.DarkStyle), glamour.WithColorProfile(lipgloss.ColorProfile()), glamour.WithWordWrap(max(20, width-4)))
+		if err != nil {
+			return markdownRenderedMsg{run: run, rendered: rendered}
+		}
 		for i, entry := range entries {
 			if entry.kind != entryAssistant {
-				continue
-			}
-			renderer, err := glamour.NewTermRenderer(glamour.WithStandardStyle(glamourstyles.DarkStyle), glamour.WithColorProfile(lipgloss.ColorProfile()), glamour.WithWordWrap(maxInt(20, width-4)))
-			if err != nil {
 				continue
 			}
 			value, err := renderer.Render(entry.content)
@@ -595,7 +595,8 @@ func heroStatusCmd(taskID int) tea.Cmd {
 }
 
 func commandIs(input, name string) bool {
-	return len(strings.Fields(input)) > 0 && strings.Fields(input)[0] == name
+	parts := strings.Fields(input)
+	return len(parts) > 0 && parts[0] == name
 }
 
 func planResume(input string) bool {
@@ -732,6 +733,3 @@ func toolArguments(arguments, name string) []string {
 	}
 	return result
 }
-
-func maxInt(a, b int) int { return int(math.Max(float64(a), float64(b))) }
-func minInt(a, b int) int { return int(math.Min(float64(a), float64(b))) }

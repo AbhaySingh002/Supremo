@@ -49,11 +49,7 @@ func (s *FileCredentialStore) GetAPIKey(provider string) (string, error) {
 		return "", err
 	}
 
-	apiKey, exists := creds.APIKeys[provider]
-	if !exists {
-		return "", errors.New("API key not found")
-	}
-	return apiKey, nil
+	return creds.APIKeys[provider], nil
 }
 
 // SetAPIKey writes the key for a provider.
@@ -63,7 +59,7 @@ func (s *FileCredentialStore) SetAPIKey(provider string, apiKey string) error {
 
 	creds, err := s.load()
 	if err != nil {
-		creds = &Credentials{APIKeys: make(map[string]string)}
+		return err
 	}
 
 	if creds.APIKeys == nil {

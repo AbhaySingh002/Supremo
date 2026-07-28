@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/AbhaySingh002/supremo/internal/models"
+	"github.com/AbhaySingh002/supremo/internal/parser/models"
 )
 
 const (

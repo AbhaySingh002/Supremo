@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/AbhaySingh002/supremo/internal/models"
+	"github.com/AbhaySingh002/supremo/internal/parser/models"
 )
 
 // Completion represents a structured response from an LLM provider.

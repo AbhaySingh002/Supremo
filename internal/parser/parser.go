@@ -1,13 +1,8 @@
 package parser
 
-import "github.com/AbhaySingh002/supremo/internal/models"
+import "github.com/AbhaySingh002/supremo/internal/parser/models"
 
-// Parser defines the interface for parsing raw LLM outputs.
-type Parser interface {
-	Parse(raw string) (*Response, error)
-}
-
-// DefaultParser implements the Parser interface.
+// DefaultParser parses raw LLM output.
 type DefaultParser struct{}
 
 // NewParser creates a new DefaultParser instance.

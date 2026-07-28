@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/AbhaySingh002/supremo/internal/models"
 	"github.com/AbhaySingh002/supremo/internal/parser"
+	"github.com/AbhaySingh002/supremo/internal/parser/models"
 	"github.com/AbhaySingh002/supremo/internal/providers"
 	"github.com/AbhaySingh002/supremo/internal/tools"
 )

@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/AbhaySingh002/supremo/internal/models"
+	"github.com/AbhaySingh002/supremo/internal/parser/models"
 )
 
 func TestOpenRouterRefreshAndRuntimeUsage(t *testing.T) {
@@ -80,7 +80,7 @@ func TestAnthropicProviderUsesMessagesAPI(t *testing.T) {
 		case "/models":
 			fmt.Fprint(w, `{"data":[{"id":"claude-test","display_name":"Claude Test"}]}`)
 		case "/messages":
-			fmt.Fprint(w, `{"content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":2}}`)
+			fmt.Fprint(w, `{"content":[{"type":"text","text":"done"},{"type":"tool_use","text":"ignored"},{"type":"text","text":" now"}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":2}}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -99,7 +99,7 @@ func TestAnthropicProviderUsesMessagesAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if completion.Raw != "done" || completion.Usage.InputTokens != 3 || completion.Usage.OutputTokens != 2 {
+	if completion.Raw != "done now" || completion.Usage.InputTokens != 3 || completion.Usage.OutputTokens != 2 {
 		t.Fatalf("unexpected completion: %#v", completion)
 	}
 }

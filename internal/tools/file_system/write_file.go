@@ -69,9 +69,8 @@ func (t *WriteFile) Execute(ctx context.Context, input any) (*tools.ToolResult, 
 	}
 
 	// Check if path exists and is a directory
-	if _, err := tools.PathExists(absPath); err == nil {
-		isDir, _ := IsDirectory(absPath)
-		if isDir {
+	if info, err := tools.PathExists(absPath); err == nil {
+		if info.IsDir() {
 			return tools.BuildToolResult(false, "Path is a directory, not a file", nil), nil
 		}
 	}

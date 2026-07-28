@@ -3,10 +3,11 @@ package providers
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 
-	"github.com/AbhaySingh002/supremo/internal/models"
+	"github.com/AbhaySingh002/supremo/internal/parser/models"
 )
 
 // Manager coordinates persisted provider settings, credentials, cached metadata, and the active client.
@@ -89,10 +90,14 @@ func (m *Manager) Chat(ctx context.Context, prompt *models.Prompt) (*Completion,
 	m.mu.RLock()
 	runtime := m.runtimeConfig
 	m.mu.RUnlock()
-	if runtime == nil || runtime.GetClient() == nil {
+	if runtime == nil {
 		return nil, fmt.Errorf("active provider client not initialized (API key may be missing)")
 	}
-	completion, err := runtime.GetClient().Chat(ctx, prompt)
+	client := runtime.GetClient()
+	if client == nil {
+		return nil, fmt.Errorf("active provider client not initialized (API key may be missing)")
+	}
+	completion, err := client.Chat(ctx, prompt)
 	if err != nil {
 		return nil, err
 	}
@@ -107,10 +112,14 @@ func (m *Manager) Stream(ctx context.Context, prompt *models.Prompt, receive fun
 	m.mu.RLock()
 	runtime := m.runtimeConfig
 	m.mu.RUnlock()
-	if runtime == nil || runtime.GetClient() == nil {
+	if runtime == nil {
 		return nil, fmt.Errorf("active provider client not initialized (API key may be missing)")
 	}
-	streamer, ok := runtime.GetClient().(StreamProvider)
+	client := runtime.GetClient()
+	if client == nil {
+		return nil, fmt.Errorf("active provider client not initialized (API key may be missing)")
+	}
+	streamer, ok := client.(StreamProvider)
 	if !ok {
 		return m.Chat(ctx, prompt)
 	}
@@ -134,8 +143,12 @@ func (m *Manager) update(ctx context.Context, change func(), persist func() erro
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
 	previousProvider, previousModel, previousEndpoint, previousAPIKey := runtime.providerName, runtime.model, runtime.endpoint, runtime.apiKey
+	previousConfig := *m.config
+	previousConfig.Models = maps.Clone(m.config.Models)
+	previousConfig.Endpoints = maps.Clone(m.config.Endpoints)
 	restore := func() {
 		runtime.providerName, runtime.model, runtime.endpoint, runtime.apiKey = previousProvider, previousModel, previousEndpoint, previousAPIKey
+		*m.config = previousConfig
 	}
 	change()
 	client, err := providerClient(ctx, runtime.providerName, runtime.apiKey, runtime.model, runtime.endpoint)
@@ -178,19 +191,27 @@ func (m *Manager) UpdateAPIKey(ctx context.Context, apiKey string) error {
 }
 
 func (m *Manager) UpdateProvider(ctx context.Context, providerName string) error {
+	apiKey, err := m.credStore.GetAPIKey(providerName)
+	if err != nil {
+		return err
+	}
 	return m.update(ctx, func() {
 		m.runtimeConfig.providerName = providerName
 		m.runtimeConfig.model = m.config.Models[providerName]
 		m.runtimeConfig.endpoint = m.config.Endpoints[providerName]
-		m.runtimeConfig.apiKey, _ = m.credStore.GetAPIKey(providerName)
+		m.runtimeConfig.apiKey = apiKey
 	}, m.saveConfig)
 }
 
 // UpdateProviderEndpoint switches provider and endpoint atomically, for custom compatible servers.
 func (m *Manager) UpdateProviderEndpoint(ctx context.Context, providerName, endpoint string) error {
+	apiKey, err := m.credStore.GetAPIKey(providerName)
+	if err != nil {
+		return err
+	}
 	return m.update(ctx, func() {
 		m.runtimeConfig.providerName, m.runtimeConfig.model, m.runtimeConfig.endpoint = providerName, m.config.Models[providerName], endpoint
-		m.runtimeConfig.apiKey, _ = m.credStore.GetAPIKey(providerName)
+		m.runtimeConfig.apiKey = apiKey
 	}, m.saveConfig)
 }
 

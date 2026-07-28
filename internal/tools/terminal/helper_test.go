@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/AbhaySingh002/supremo/internal/tools"
 )
 
 func TestHelperProcess(t *testing.T) {
@@ -53,5 +55,16 @@ func TestExecuteCommandWithOutputBoundsAndCancels(t *testing.T) {
 	output, err = ExecuteCommandWithOutput(ctx, helperCommand(ctx, "sleep", 0))
 	if err != nil || !output.Canceled || output.ExitCode != -2 || strings.Contains(string(output.Stderr), "panic") {
 		t.Fatalf("canceled command: output=%#v err=%v", output, err)
+	}
+}
+
+func TestExecuteCommandRejectsWorkingDirectoryOutsideWorkspace(t *testing.T) {
+	ctx := tools.WithWorkspace(context.Background(), t.TempDir())
+	result, err := (&ExecuteCommand{}).Execute(ctx, map[string]any{
+		"command":   "pwd",
+		"directory": t.TempDir(),
+	})
+	if err != nil || result == nil || result.Success || !strings.Contains(result.Message, "inside the workspace") {
+		t.Fatalf("outside directory result: %#v, %v", result, err)
 	}
 }

@@ -108,3 +108,51 @@ func TestManagerKeepsEndpointAndModelPerProvider(t *testing.T) {
 		t.Fatalf("named compatible provider was not stored: provider=%q endpoint=%q", provider, endpoint)
 	}
 }
+
+func TestManagerHandlesMissingAndCorruptCredentials(t *testing.T) {
+	dir := t.TempDir()
+	if err := SaveConfig(dir, &Config{ProviderName: "openai", Model: "gpt-test"}); err != nil {
+		t.Fatal(err)
+	}
+	store := NewFileCredentialStore(dir)
+	manager := NewManager(dir, store)
+	if err := manager.Initialize(context.Background()); err != nil {
+		t.Fatalf("initialize without stored key: %v", err)
+	}
+	if manager.GetRuntimeConfig().CredentialConfigured() {
+		t.Fatal("missing key reported as configured")
+	}
+
+	path := filepath.Join(dir, credentialsFileName)
+	if err := os.WriteFile(path, []byte("{"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetAPIKey("openai", "replacement"); err == nil {
+		t.Fatal("corrupt credentials should not be overwritten")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "{" {
+		t.Fatalf("corrupt credentials changed: %q, %v", data, err)
+	}
+}
+
+func TestManagerRollsBackConfigWhenPersistenceFails(t *testing.T) {
+	dir := t.TempDir()
+	store := NewFileCredentialStore(dir)
+	if err := store.SetAPIKey("gemini", "key"); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(dir, store)
+	if err := manager.Initialize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	manager.configDir = filepath.Join(dir, "missing")
+	if err := manager.UpdateModel(context.Background(), "replacement"); err == nil {
+		t.Fatal("expected persistence failure")
+	}
+	_, model, _, _, _ := manager.GetRuntimeConfig().Get()
+	if model != "gemini-2.5-flash" || manager.config.Model != model || manager.config.Models["gemini"] != model {
+		t.Fatalf("failed update leaked into memory: runtime=%q config=%#v", model, manager.config)
+	}
+}

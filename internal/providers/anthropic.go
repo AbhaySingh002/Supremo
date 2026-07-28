@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
-	"github.com/AbhaySingh002/supremo/internal/models"
+	"github.com/AbhaySingh002/supremo/internal/parser/models"
 )
 
 const anthropicEndpoint = "https://api.anthropic.com/v1"
@@ -67,12 +68,16 @@ func (p *AnthropicProvider) Chat(ctx context.Context, prompt *models.Prompt) (*C
 	if err := doJSON(ctx, p.client, http.MethodPost, apiURL(p.endpoint, "messages"), "", p.headers(), request{Model: p.model, MaxTokens: 4096, System: prompt.System, Messages: messages}, &responseBody); err != nil {
 		return nil, fmt.Errorf("anthropic execution: %w", err)
 	}
+	var text strings.Builder
 	for _, block := range responseBody.Content {
 		if block.Type == "text" && block.Text != "" {
-			return &Completion{Raw: block.Text, FinishReason: responseBody.StopReason, Usage: Usage{InputTokens: responseBody.Usage.InputTokens, OutputTokens: responseBody.Usage.OutputTokens}}, nil
+			text.WriteString(block.Text)
 		}
 	}
-	return nil, fmt.Errorf("anthropic returned no text content")
+	if text.Len() == 0 {
+		return nil, fmt.Errorf("anthropic returned no text content")
+	}
+	return &Completion{Raw: text.String(), FinishReason: responseBody.StopReason, Usage: Usage{InputTokens: responseBody.Usage.InputTokens, OutputTokens: responseBody.Usage.OutputTokens}}, nil
 }
 
 func (p *AnthropicProvider) FetchMetadata(ctx context.Context) (Metadata, error) {

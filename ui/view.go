@@ -15,7 +15,7 @@ func (m Model) View() string {
 	}
 	parts := []string{m.headerView(), m.bodyView()}
 	if m.paletteOpen && m.approval == nil && !m.showSidebar && !m.showHelp {
-		parts = append(parts, m.styles.palette.Width(maxInt(18, minInt(m.width-4, 72))).Render(m.palette.View()))
+		parts = append(parts, m.styles.palette.Width(max(18, min(m.width-4, 72))).Render(m.palette.View()))
 	}
 	parts = append(parts, m.inputView(), m.footerView())
 	return strings.Join(parts, "\n")
@@ -51,11 +51,11 @@ func (m Model) headerView() string {
 	if m.debug {
 		parts = append(parts, m.styles.muted.Render("debug"))
 	}
-	return m.styles.header.Width(maxInt(1, m.width-2)).Render(strings.Join(parts, "  "))
+	return m.styles.header.Width(max(1, m.width-2)).Render(strings.Join(parts, "  "))
 }
 
 func (m Model) bodyView() string {
-	height := maxInt(1, m.feed.Height)
+	height := max(1, m.feed.Height)
 	if m.approval != nil {
 		return lipgloss.Place(m.width, height, lipgloss.Center, lipgloss.Center, m.approvalView())
 	}
@@ -103,11 +103,11 @@ func (m Model) welcomeView() string {
 		m.styles.text.Render("Describe a task below, or use a command:"),
 		m.styles.command.Render("/plan") + m.styles.muted.Render(" plan work") + "   " + m.styles.command.Render("/tools") + m.styles.muted.Render(" inspect tools") + "   " + m.styles.command.Render("/help") + m.styles.muted.Render(" all commands"),
 	}, "\n")
-	return m.styles.welcome.Width(maxInt(20, minInt(m.width-6, 76))).Render(content)
+	return m.styles.welcome.Width(max(20, min(m.width-6, 76))).Render(content)
 }
 
 func (m Model) inputView() string {
-	divider := m.styles.divider.Width(maxInt(1, m.width-2)).Render("")
+	divider := m.styles.divider.Width(max(1, m.width-2)).Render("")
 	mode := m.approvalModeView()
 	if m.approval != nil {
 		return strings.Join([]string{divider, mode, m.styles.muted.Render("Approval controls are active above.")}, "\n")
@@ -115,7 +115,7 @@ func (m Model) inputView() string {
 	if m.focusFeed {
 		return strings.Join([]string{divider, mode, m.styles.muted.Render("Transcript focused. Press Esc or Ctrl+N to return to the prompt.")}, "\n")
 	}
-	return strings.Join([]string{divider, mode, m.styles.input.Width(maxInt(1, m.width-2)).Render(m.input.View())}, "\n")
+	return strings.Join([]string{divider, mode, m.styles.input.Width(max(1, m.width-2)).Render(m.input.View())}, "\n")
 }
 
 func (m Model) approvalModeView() string {
@@ -167,7 +167,10 @@ func (m Model) executionView() string {
 		out.WriteString("\n")
 		if phase == "build" && m.plan != nil {
 			for _, step := range m.plan.Steps {
-				out.WriteString("  " + planStepMark(step.Status) + " " + truncate(step.Description, 48))
+				out.WriteString("  ")
+				out.WriteString(planStepMark(step.Status))
+				out.WriteString(" ")
+				out.WriteString(truncate(step.Description, 48))
 				out.WriteString("\n")
 			}
 		}
@@ -179,13 +182,17 @@ func (m Model) executionView() string {
 	out.WriteString("\n")
 	out.WriteString(m.styles.title.Render("RECENT TOOLS"))
 	if len(m.activity) == 0 {
-		out.WriteString("\n" + m.styles.muted.Render("  No tool activity"))
+		out.WriteString("\n")
+		out.WriteString(m.styles.muted.Render("  No tool activity"))
 	}
 	for _, event := range m.activity {
 		label := conciseToolLabel(event.Tool, event.Status, event.Arguments)
-		out.WriteString("\n  " + toolMark(event.Status) + " " + truncate(label, 48))
+		out.WriteString("\n  ")
+		out.WriteString(toolMark(event.Status))
+		out.WriteString(" ")
+		out.WriteString(truncate(label, 48))
 	}
-	return m.styles.overlay.Width(maxInt(24, minInt(m.width-8, 64))).Render(strings.TrimRight(out.String(), "\n"))
+	return m.styles.overlay.Width(max(24, min(m.width-8, 64))).Render(strings.TrimRight(out.String(), "\n"))
 }
 
 func (m Model) helpView() string {
@@ -203,7 +210,7 @@ func (m Model) helpView() string {
 		"Ctrl+C  exit Supremo",
 		"Esc  return to the prompt",
 	}, "\n")
-	return m.styles.overlay.Width(maxInt(24, minInt(m.width-8, 58))).Render(content)
+	return m.styles.overlay.Width(max(24, min(m.width-8, 58))).Render(content)
 }
 
 func (m Model) phaseLine(phase string) string {
@@ -275,5 +282,5 @@ func (m Model) approvalView() string {
 		"",
 		m.styles.muted.Render("a approve · d or esc deny · /deny <reason> then enter"),
 	}, "\n")
-	return m.styles.modal.Width(maxInt(20, minInt(m.width-10, 76))).Render(content)
+	return m.styles.modal.Width(max(20, min(m.width-10, 76))).Render(content)
 }

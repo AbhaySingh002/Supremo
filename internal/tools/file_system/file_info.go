@@ -73,8 +73,7 @@ func (t *FileInfo) Execute(ctx context.Context, input any) (*tools.ToolResult, e
 
 	// Determine type
 	fileType := "file"
-	isDir, _ := IsDirectory(absPath)
-	if isDir {
+	if info.IsDir() {
 		fileType = "directory"
 	}
 

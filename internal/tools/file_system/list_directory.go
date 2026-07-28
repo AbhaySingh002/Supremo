@@ -69,16 +69,12 @@ func (t *ListDirectory) Execute(ctx context.Context, input any) (*tools.ToolResu
 	}
 
 	// Check if path exists and is a directory
-	_, err = tools.PathExists(absPath)
+	info, err := tools.PathExists(absPath)
 	if err != nil {
 		return tools.BuildToolResult(false, "Path does not exist", nil), nil
 	}
 
-	isDir, err := IsDirectory(absPath)
-	if err != nil {
-		return tools.BuildToolResult(false, "Failed to check path type: "+err.Error(), nil), nil
-	}
-	if !isDir {
+	if !info.IsDir() {
 		return tools.BuildToolResult(false, "Path is not a directory", nil), nil
 	}
 

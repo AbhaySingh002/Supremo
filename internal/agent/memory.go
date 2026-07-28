@@ -12,7 +12,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/AbhaySingh002/supremo/internal/models"
+	"github.com/AbhaySingh002/supremo/internal/parser/models"
 	"github.com/AbhaySingh002/supremo/internal/storage"
 )
 
