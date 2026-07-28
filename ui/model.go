@@ -591,7 +591,7 @@ func pulseCmd() tea.Cmd {
 }
 
 func heroStatusCmd(taskID int) tea.Cmd {
-	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return heroStatusMsg{taskID: taskID} })
+	return tea.Tick(4*time.Second, func(time.Time) tea.Msg { return heroStatusMsg{taskID: taskID} })
 }
 
 func commandIs(input, name string) bool {
