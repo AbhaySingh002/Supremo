@@ -97,7 +97,7 @@ func TestManagerKeepsEndpointAndModelPerProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider, model, endpoint, _, _ := manager.GetRuntimeConfig().Get()
-	if provider != "gemini" || model != "gemini-2.5-flash" || endpoint != "https://gemini.example/" {
+	if provider != "gemini" || model != defaultGeminiModel || endpoint != "https://gemini.example/" {
 		t.Fatalf("gemini config was not restored: provider=%q model=%q endpoint=%q", provider, model, endpoint)
 	}
 	if err := manager.UpdateProviderEndpoint(context.Background(), "openai-compatible:local", "http://localhost:11434/v1"); err != nil {
@@ -152,7 +152,7 @@ func TestManagerRollsBackConfigWhenPersistenceFails(t *testing.T) {
 		t.Fatal("expected persistence failure")
 	}
 	_, model, _, _, _ := manager.GetRuntimeConfig().Get()
-	if model != "gemini-2.5-flash" || manager.config.Model != model || manager.config.Models["gemini"] != model {
+	if model != defaultGeminiModel || manager.config.Model != model || manager.config.Models["gemini"] != model {
 		t.Fatalf("failed update leaked into memory: runtime=%q config=%#v", model, manager.config)
 	}
 }

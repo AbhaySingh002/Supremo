@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -156,13 +157,19 @@ func (p *GeminiProvider) FetchMetadata(ctx context.Context) (Metadata, error) {
 		if err != nil {
 			return Metadata{}, fmt.Errorf("list Gemini models: %w", err)
 		}
-		if model == nil {
+		if !isGeminiTextModel(model) {
 			continue
 		}
 		id := strings.TrimPrefix(model.Name, "models/")
 		metadata.Models = append(metadata.Models, ModelInfo{ID: id, Name: model.DisplayName, ContextLength: int(model.InputTokenLimit)})
 	}
 	return metadata, nil
+}
+
+func isGeminiTextModel(model *genai.Model) bool {
+	return model != nil &&
+		slices.Contains(model.SupportedActions, "generateContent") &&
+		!strings.Contains(strings.ToLower(model.Name), "image")
 }
 
 // safeExtractText returns only the response text, never the model's private thoughts.

@@ -445,7 +445,7 @@ func NewRegistry() *Registry {
 	// 23. /model
 	r.Register(Command{
 		Name:        "/model",
-		Description: "Change model (e.g. gemini-2.5-flash)",
+		Description: "Change model (e.g. gemini-3.6-flash)",
 		Execute: func(ctx context.Context, app *app.App, session *agent.Session, args []string) (string, error) {
 			if len(args) == 0 {
 				return "", fmt.Errorf("usage: /model <model_name>")

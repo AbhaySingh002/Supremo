@@ -10,7 +10,8 @@ import (
 )
 
 const (
-	configFileName = "config.yaml"
+	configFileName     = "config.yaml"
+	defaultGeminiModel = "gemini-3.6-flash"
 )
 
 // Config represents the persisted YAML configuration for Supremo.
@@ -52,7 +53,7 @@ func LoadConfig(dir string) (*Config, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			defaultCfg := &Config{
 				ProviderName: "gemini",
-				Model:        "gemini-2.5-flash",
+				Model:        defaultGeminiModel,
 				Endpoint:     "",
 			}
 			if err := SaveConfig(dir, defaultCfg); err != nil {
