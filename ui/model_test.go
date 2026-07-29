@@ -161,6 +161,78 @@ func TestComposerStartsSingleLineAndGrowsForAltEnter(t *testing.T) {
 	}
 }
 
+func TestComposerWrapsAndKeepsNewLinesVisible(t *testing.T) {
+	m := newTestModel(t)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 30, Height: 24})
+	m = updated.(Model)
+	for _, r := range strings.Repeat("wrap ", 20) {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = updated.(Model)
+	}
+	if got := m.input.Height(); got != 4 {
+		t.Fatalf("wrapped composer height = %d, want capped height 4", got)
+	}
+	for _, line := range strings.Split(m.input.View(), "\n") {
+		if width := lipgloss.Width(line); width > m.width-3 {
+			t.Fatalf("input line width = %d, terminal content width = %d", width, m.width-3)
+		}
+	}
+
+	m = newTestModel(t)
+	m.input.SetValue("first line")
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	m = updated.(Model)
+	if view := m.input.View(); !strings.Contains(view, "first line") {
+		t.Fatalf("growing the composer hid the previous line:\n%s", view)
+	}
+	for range 5 {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+		m = updated.(Model)
+	}
+	if got := m.input.LineCount(); got != 7 {
+		t.Fatalf("composer line count = %d, want 7", got)
+	}
+}
+
+func TestClickPositionsComposerCursor(t *testing.T) {
+	m := newTestModel(t)
+	m.input.SetValue(strings.Join([]string{"zero", "one", "two", "three", "four", "five"}, "\n"))
+	m.resizeComposer()
+	top := lipgloss.Height(m.headerView()) + lipgloss.Height(m.bodyView()) + 4
+	left := m.styles.input.GetPaddingLeft() + lipgloss.Width(m.input.Prompt)
+	updated, _ := m.Update(tea.MouseMsg{
+		X:      left + 2,
+		Y:      top,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+	})
+	m = updated.(Model)
+	if got := m.input.Line(); got != 2 {
+		t.Fatalf("clicked input line = %d, want 2", got)
+	}
+	if got := m.input.LineInfo().ColumnOffset; got != 2 {
+		t.Fatalf("clicked input column = %d, want 2", got)
+	}
+
+	m = newTestModel(t)
+	updated, _ = m.Update(tea.WindowSizeMsg{Width: 20, Height: 24})
+	m = updated.(Model)
+	m.input.SetValue("alpha beta gamma delta")
+	m.resizeComposer()
+	top = lipgloss.Height(m.headerView()) + lipgloss.Height(m.bodyView()) + 4
+	left = m.styles.input.GetPaddingLeft() + lipgloss.Width(m.input.Prompt)
+	updated, _ = m.Update(tea.MouseMsg{
+		X:      left + 2,
+		Y:      top + 1,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+	})
+	m = updated.(Model)
+	if info := m.input.LineInfo(); info.RowOffset != 1 || info.CharOffset != 2 {
+		t.Fatalf("clicked wrapped position = row %d, column %d; want row 1, column 2", info.RowOffset, info.CharOffset)
+	}
+}
+
 func TestCommandPaletteSupportsAllCommandsAndCompletion(t *testing.T) {
 	m := newTestModel(t)
 	m.input.SetValue("/")

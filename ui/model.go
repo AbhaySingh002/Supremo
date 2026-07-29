@@ -122,6 +122,7 @@ type Model struct {
 	width        int
 	height       int
 	input        textarea.Model
+	inputOffset  int
 	feed         viewport.Model
 	palette      list.Model
 	spinner      spinner.Model
@@ -171,7 +172,7 @@ func New(application *app.App, session *agent.Session, ctx context.Context, shut
 	input.ShowLineNumbers = false
 	input.SetWidth(78)
 	input.SetHeight(1)
-	input.MaxHeight = 4
+	input.MaxHeight = 0
 	input.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("alt+enter"), key.WithHelp("alt+enter", "newline"))
 	input.FocusedStyle.Base = styles.composerBase
 	input.FocusedStyle.Prompt = styles.accent
@@ -257,6 +258,9 @@ func (m *Model) refreshProvider() {
 func (m *Model) layout() {
 	m.width = max(1, m.width)
 	m.height = max(1, m.height)
+	m.input.SetWidth(max(1, m.width-3))
+	m.input.SetHeight(min(4, composerRows(m.input)))
+	m.realignComposer()
 	paletteHeight := 0
 	if m.paletteOpen {
 		paletteHeight = min(8, max(3, m.height/3))
@@ -265,24 +269,89 @@ func (m *Model) layout() {
 	bodyHeight := max(1, m.height-3-inputHeight-paletteHeight)
 	m.feed.Width = m.width
 	m.feed.Height = bodyHeight
-	m.input.SetWidth(max(1, m.width-3))
 	m.palette.SetSize(max(20, min(72, m.width-4)), paletteHeight)
 	m.rebuildFeed()
 }
 
 func (m *Model) resetComposer() {
 	m.input.Reset()
+	m.inputOffset = 0
 	m.input.SetHeight(1)
 	m.layout()
 }
 
 func (m *Model) resizeComposer() {
-	height := min(4, max(1, strings.Count(m.input.Value(), "\n")+1))
-	if height == m.input.Height() {
+	rows, cursorRow := composerMetrics(m.input)
+	if height := min(4, rows); height != m.input.Height() {
+		m.layout()
 		return
 	}
-	m.input.SetHeight(height)
-	m.layout()
+	needsRealign := m.inputOffset > max(0, rows-m.input.Height())
+	m.syncComposerOffset(rows, cursorRow)
+	if needsRealign {
+		m.realignComposer()
+	}
+}
+
+func composerRows(input textarea.Model) int {
+	rows, _ := composerMetrics(input)
+	return rows
+}
+
+func composerMetrics(input textarea.Model) (rows, cursorRow int) {
+	targetLine, targetWrap := input.Line(), input.LineInfo().RowOffset
+	probe := textarea.New()
+	probe.Prompt = ""
+	probe.ShowLineNumbers = false
+	probe.SetWidth(input.Width())
+	for line, value := range strings.Split(input.Value(), "\n") {
+		probe.SetValue(value)
+		if line == targetLine {
+			cursorRow = rows + targetWrap
+		}
+		rows += probe.LineInfo().Height
+	}
+	return rows, cursorRow
+}
+
+func moveComposerCursor(input *textarea.Model, line int) {
+	for input.Line() > line {
+		input.CursorStart()
+		input.CursorUp()
+	}
+	for input.Line() < line {
+		input.CursorEnd()
+		input.CursorDown()
+	}
+}
+
+func (m *Model) realignComposer() {
+	focused := m.input.Focused()
+	if !focused {
+		m.input.Focus()
+	}
+	line := m.input.Line()
+	_, cursorRow := composerMetrics(m.input)
+	cursorColumn := m.input.LineInfo().StartColumn + m.input.LineInfo().ColumnOffset
+	moveComposerCursor(&m.input, 0)
+	m.input.CursorStart()
+	m.input, _ = m.input.Update(nil)
+	moveComposerCursor(&m.input, line)
+	m.input.SetCursor(cursorColumn)
+	m.input, _ = m.input.Update(nil)
+	m.inputOffset = max(0, cursorRow-m.input.Height()+1)
+	if !focused {
+		m.input.Blur()
+	}
+}
+
+func (m *Model) syncComposerOffset(rows, cursorRow int) {
+	m.inputOffset = min(m.inputOffset, max(0, rows-m.input.Height()))
+	if cursorRow < m.inputOffset {
+		m.inputOffset = cursorRow
+	} else if cursorRow >= m.inputOffset+m.input.Height() {
+		m.inputOffset = cursorRow - m.input.Height() + 1
+	}
 }
 
 func (m *Model) appendEntry(kind entryKind, content string) {

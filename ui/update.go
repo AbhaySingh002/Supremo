@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -75,6 +76,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, heroStatusCmd(msg.taskID)
 	case tea.MouseMsg:
+		if handled, cmd := m.positionComposerCursor(msg); handled {
+			return m, cmd
+		}
 		if m.approval != nil || m.showHelp || m.showSidebar || m.paletteOpen {
 			return m, nil
 		}
@@ -600,6 +604,65 @@ func (m *Model) toggleToolAtMouse(msg tea.MouseMsg) bool {
 		line -= height + 2
 	}
 	return false
+}
+
+func (m *Model) positionComposerCursor(msg tea.MouseMsg) (bool, tea.Cmd) {
+	if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress ||
+		m.approval != nil || m.showHelp || m.showSidebar || m.focusFeed {
+		return false, nil
+	}
+	top := lipgloss.Height(m.headerView()) + lipgloss.Height(m.bodyView()) + 4
+	if m.paletteOpen {
+		palette := m.styles.palette.Width(max(18, min(m.width-4, 72))).Render(m.palette.View())
+		top += lipgloss.Height(palette) + 1
+	}
+	row := msg.Y - top
+	if msg.X < 0 || msg.X >= m.width || row < 0 || row >= m.input.Height() {
+		return false, nil
+	}
+
+	lineNumber, info := composerTarget(m.input, m.inputOffset+row)
+	moveComposerCursor(&m.input, lineNumber)
+	lines := strings.Split(m.input.Value(), "\n")
+	line := []rune(lines[m.input.Line()])
+	start := min(info.StartColumn, len(line))
+	end := min(start+info.Width, len(line))
+	x := max(0, msg.X-m.styles.input.GetPaddingLeft()-lipgloss.Width(m.input.Prompt))
+	column := start
+	for column < end && lipgloss.Width(string(line[start:column+1])) <= x {
+		column++
+	}
+	m.input.SetCursor(column)
+	focus := m.input.Focus()
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(nil)
+	rows, cursorRow := composerMetrics(m.input)
+	m.syncComposerOffset(rows, cursorRow)
+	return true, tea.Batch(focus, cmd)
+}
+
+func composerTarget(input textarea.Model, row int) (int, textarea.LineInfo) {
+	probe := textarea.New()
+	probe.Prompt = ""
+	probe.ShowLineNumbers = false
+	probe.SetWidth(input.Width())
+	lines := strings.Split(input.Value(), "\n")
+	for lineNumber, line := range lines {
+		probe.SetValue(line)
+		height := probe.LineInfo().Height
+		if row >= height {
+			row -= height
+			continue
+		}
+		for column := range len([]rune(line)) + 1 {
+			probe.SetCursor(column)
+			if info := probe.LineInfo(); info.RowOffset == row {
+				return lineNumber, info
+			}
+		}
+	}
+	probe.SetValue(lines[len(lines)-1])
+	return len(lines) - 1, probe.LineInfo()
 }
 
 func phaseLabel(phase string) string {
