@@ -17,6 +17,7 @@ type styles struct {
 	user                       lipgloss.Style
 	tool                       lipgloss.Style
 	input                      lipgloss.Style
+	selection                  lipgloss.Style
 	composerBase               lipgloss.Style
 	footer                     lipgloss.Style
 	divider                    lipgloss.Style
@@ -34,10 +35,10 @@ type styles struct {
 
 func newStyles() styles {
 	charcoal := lipgloss.AdaptiveColor{Light: "#1E1E1E", Dark: "#1E1E1E"}
-	surface := lipgloss.AdaptiveColor{Light: "#242424", Dark: "#242424"}
+	surface := lipgloss.AdaptiveColor{Light: "#292929", Dark: "#292929"}
 	fg := lipgloss.AdaptiveColor{Light: "#F4F4F1", Dark: "#F4F4F1"}
 	muted := lipgloss.AdaptiveColor{Light: "#9A9A9A", Dark: "#9A9A9A"}
-	border := lipgloss.AdaptiveColor{Light: "#5E5E5E", Dark: "#5E5E5E"}
+	border := lipgloss.AdaptiveColor{Light: "#6A6A6A", Dark: "#6A6A6A"}
 	coral := lipgloss.AdaptiveColor{Light: "#E07A5F", Dark: "#E07A5F"}
 	green := lipgloss.AdaptiveColor{Light: "#65C466", Dark: "#65C466"}
 	yellow := lipgloss.AdaptiveColor{Light: "#F1C453", Dark: "#F1C453"}
@@ -49,7 +50,7 @@ func newStyles() styles {
 
 	return styles{
 		header:                     base.Foreground(fg).Border(lipgloss.NormalBorder(), false, false, true, false).BorderForeground(border).Padding(0, 1),
-		welcome:                    base.Border(lipgloss.NormalBorder()).BorderForeground(coral).Padding(1, 2),
+		welcome:                    base.Border(lipgloss.NormalBorder()).BorderForeground(border).Padding(1, 2),
 		overlay:                    base.Background(surface).Border(lipgloss.NormalBorder()).BorderForeground(coral).Padding(1, 2),
 		palette:                    base.Background(surface).Border(lipgloss.NormalBorder()).BorderForeground(border).Padding(0, 1),
 		title:                      base.Bold(true).Foreground(fg),
@@ -62,10 +63,11 @@ func newStyles() styles {
 		user:                       base.Bold(true).Foreground(coral),
 		tool:                       base.Foreground(fg),
 		input:                      base.Foreground(fg).PaddingLeft(1),
+		selection:                  base.Foreground(charcoal).Background(coral),
 		composerBase:               base.Foreground(fg),
 		footer:                     base.Foreground(muted).Padding(0, 1),
 		divider:                    base.BorderTop(true).BorderStyle(lipgloss.NormalBorder()).BorderForeground(border),
-		modal:                      base.Background(surface).Border(lipgloss.DoubleBorder()).BorderForeground(red).Padding(1, 2),
+		modal:                      base.Background(surface).Border(lipgloss.NormalBorder()).BorderForeground(yellow).Padding(1, 2),
 		command:                    base.Foreground(coral),
 		debug:                      base.Foreground(muted),
 		status:                     base.Foreground(muted),

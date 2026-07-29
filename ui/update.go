@@ -6,12 +6,14 @@ import (
 	"math"
 	"strings"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/AbhaySingh002/supremo/internal/agent"
 	"github.com/AbhaySingh002/supremo/internal/commands"
@@ -51,11 +53,13 @@ type markdownRenderedMsg struct {
 }
 type pulseMsg struct{}
 type heroStatusMsg struct{ taskID int }
+type selectionCopiedMsg struct{ err error }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		m.selection = nil
 		m.layout()
 		return m, m.renderMarkdown()
 	case spinner.TickMsg:
@@ -76,6 +80,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, heroStatusCmd(msg.taskID)
 	case tea.MouseMsg:
+		if handled, cmd := m.updateMouseSelection(msg); handled {
+			return m, cmd
+		}
 		if handled, cmd := m.positionComposerCursor(msg); handled {
 			return m, cmd
 		}
@@ -88,6 +95,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.feed, cmd = m.feed.Update(msg)
 		return m, cmd
+	case selectionCopiedMsg:
+		if msg.err != nil {
+			m.selection = nil
+			m.appendEntry(entryError, "Copy failed: "+msg.err.Error())
+		}
+		return m, nil
 	case pulseMsg:
 		if !m.pulseEnabled {
 			return m, nil
@@ -215,6 +228,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.selection != nil {
+		if msg.Type == tea.KeyEsc {
+			m.selection = nil
+			return m, nil
+		}
+		if m.selection.active() && msg.Type == tea.KeyCtrlC {
+			return m, copySelectionCmd(m.selectedText())
+		}
+		if m.selection.active() && m.selection.input {
+			switch {
+			case selectionDeleteKey(msg, m.input):
+				m.deleteInputSelection()
+				return m, m.updatePalette()
+			case len(msg.Runes) > 0 || key.Matches(msg, m.input.KeyMap.Paste, m.input.KeyMap.InsertNewline):
+				m.deleteInputSelection()
+			default:
+				m.selection = nil
+			}
+		} else {
+			m.selection = nil
+		}
+	}
 	if msg.Type == tea.KeyCtrlC {
 		if m.active != nil {
 			m.active.cancel()
@@ -587,7 +622,7 @@ func (m *Model) toggleToolAtMouse(msg tea.MouseMsg) bool {
 	if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress {
 		return false
 	}
-	line := msg.Y - lipgloss.Height(m.headerView()) - 1 + m.feed.YOffset
+	line := msg.Y - lipgloss.Height(m.headerView()) + m.feed.YOffset - m.feedPadding
 	if line < 0 {
 		return false
 	}
@@ -606,16 +641,78 @@ func (m *Model) toggleToolAtMouse(msg tea.MouseMsg) bool {
 	return false
 }
 
+func (m *Model) updateMouseSelection(msg tea.MouseMsg) (bool, tea.Cmd) {
+	if m.approval != nil || m.showHelp || m.showSidebar || m.focusFeed {
+		return false, nil
+	}
+	switch {
+	case msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress:
+		m.selection = &textSelection{
+			startX:   msg.X,
+			startY:   msg.Y,
+			endX:     msg.X,
+			endY:     msg.Y,
+			dragging: true,
+		}
+		handled, cmd := m.positionComposerCursor(msg)
+		if handled {
+			m.selection.input = true
+			m.selection.inputLeft = m.styles.input.GetPaddingLeft() + lipgloss.Width(m.input.Prompt)
+			m.selection.anchor = composerCursorOffset(m.input)
+			m.selection.head = m.selection.anchor
+		}
+		return true, cmd
+	case msg.Action == tea.MouseActionMotion && m.selection != nil && m.selection.dragging:
+		if m.selection.input {
+			if handled, cmd := m.positionComposerCursor(msg); handled {
+				m.selection.endX, m.selection.endY = msg.X, msg.Y
+				m.selection.head = composerCursorOffset(m.input)
+				return true, cmd
+			}
+			return true, nil
+		}
+		m.selection.endX, m.selection.endY = msg.X, msg.Y
+		return true, nil
+	case msg.Action == tea.MouseActionRelease && m.selection != nil && m.selection.dragging:
+		selection := m.selection
+		selection.dragging = false
+		if selection.input {
+			drag := msg
+			drag.Button = tea.MouseButtonLeft
+			drag.Action = tea.MouseActionMotion
+			handled, cmd := m.positionComposerCursor(drag)
+			if handled {
+				selection.endX, selection.endY = msg.X, msg.Y
+				selection.head = composerCursorOffset(m.input)
+			}
+			if selection.active() {
+				return true, tea.Batch(cmd, copySelectionCmd(m.selectedText()))
+			}
+		} else {
+			selection.endX, selection.endY = msg.X, msg.Y
+			if selection.active() {
+				text := m.selectedText()
+				if text != "" {
+					return true, copySelectionCmd(text)
+				}
+				m.selection = nil
+				return true, nil
+			}
+		}
+		click := tea.MouseMsg{X: selection.startX, Y: selection.startY, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress}
+		m.selection = nil
+		m.toggleToolAtMouse(click)
+		return true, nil
+	}
+	return false, nil
+}
+
 func (m *Model) positionComposerCursor(msg tea.MouseMsg) (bool, tea.Cmd) {
-	if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress ||
+	if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress && msg.Action != tea.MouseActionMotion ||
 		m.approval != nil || m.showHelp || m.showSidebar || m.focusFeed {
 		return false, nil
 	}
-	top := lipgloss.Height(m.headerView()) + lipgloss.Height(m.bodyView()) + 4
-	if m.paletteOpen {
-		palette := m.styles.palette.Width(max(18, min(m.width-4, 72))).Render(m.palette.View())
-		top += lipgloss.Height(palette) + 1
-	}
+	top := lipgloss.Height(m.View()) - lipgloss.Height(m.footerView()) - m.input.Height()
 	row := msg.Y - top
 	if msg.X < 0 || msg.X >= m.width || row < 0 || row >= m.input.Height() {
 		return false, nil
@@ -639,6 +736,87 @@ func (m *Model) positionComposerCursor(msg tea.MouseMsg) (bool, tea.Cmd) {
 	rows, cursorRow := composerMetrics(m.input)
 	m.syncComposerOffset(rows, cursorRow)
 	return true, tea.Batch(focus, cmd)
+}
+
+func composerCursorOffset(input textarea.Model) int {
+	offset := input.LineInfo().StartColumn + input.LineInfo().ColumnOffset
+	for _, line := range strings.Split(input.Value(), "\n")[:input.Line()] {
+		offset += len([]rune(line)) + 1
+	}
+	return offset
+}
+
+func (m Model) selectedText() string {
+	if !m.selection.active() {
+		return ""
+	}
+	if m.selection.input {
+		value := []rune(m.input.Value())
+		start, end := min(m.selection.anchor, m.selection.head), max(m.selection.anchor, m.selection.head)
+		return string(value[start:end])
+	}
+	startX, startY, endX, endY := orderedSelection(m.selection)
+	lines := strings.Split(m.View(), "\n")
+	startY, endY = max(0, startY), min(endY, len(lines)-1)
+	if startY > endY {
+		return ""
+	}
+	selected := make([]string, 0, endY-startY+1)
+	for row := startY; row <= endY; row++ {
+		line := lines[row]
+		left, right := 0, lipgloss.Width(line)
+		if row == startY {
+			left = min(max(0, startX), right)
+		}
+		if row == endY {
+			right = min(max(0, endX), right)
+		}
+		selected = append(selected, strings.TrimRight(ansiText(line, left, right), " "))
+	}
+	return strings.TrimRight(strings.Join(selected, "\n"), "\n")
+}
+
+func ansiText(line string, left, right int) string {
+	return ansi.Strip(ansi.Cut(line, left, right))
+}
+
+func copySelectionCmd(text string) tea.Cmd {
+	if text == "" {
+		return nil
+	}
+	return func() tea.Msg {
+		return selectionCopiedMsg{err: clipboard.WriteAll(text)}
+	}
+}
+
+func selectionDeleteKey(msg tea.KeyMsg, input textarea.Model) bool {
+	return key.Matches(msg,
+		input.KeyMap.DeleteAfterCursor,
+		input.KeyMap.DeleteBeforeCursor,
+		input.KeyMap.DeleteCharacterBackward,
+		input.KeyMap.DeleteCharacterForward,
+		input.KeyMap.DeleteWordBackward,
+		input.KeyMap.DeleteWordForward,
+	)
+}
+
+func (m *Model) deleteInputSelection() {
+	value := []rune(m.input.Value())
+	start, end := min(m.selection.anchor, m.selection.head), max(m.selection.anchor, m.selection.head)
+	m.input.SetValue(string(append(value[:start], value[end:]...)))
+	moveComposerCursor(&m.input, 0)
+	offset := start
+	for line, text := range strings.Split(m.input.Value(), "\n") {
+		width := len([]rune(text))
+		if offset <= width {
+			moveComposerCursor(&m.input, line)
+			m.input.SetCursor(offset)
+			break
+		}
+		offset -= width + 1
+	}
+	m.selection = nil
+	m.resizeComposer()
 }
 
 func composerTarget(input textarea.Model, row int) (int, textarea.LineInfo) {

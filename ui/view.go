@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/AbhaySingh002/supremo/internal/agent"
 )
@@ -18,7 +19,11 @@ func (m Model) View() string {
 		parts = append(parts, m.styles.palette.Width(max(18, min(m.width-4, 72))).Render(m.palette.View()))
 	}
 	parts = append(parts, m.inputView(), m.footerView())
-	return strings.Join(parts, "\n")
+	view := strings.Join(parts, "\n")
+	if m.selection.active() {
+		return highlightSelection(view, m.selection, m.styles.selection)
+	}
+	return view
 }
 
 func (m Model) headerView() string {
@@ -41,7 +46,11 @@ func (m Model) headerView() string {
 		credential = m.styles.error.Render("! key needed")
 	}
 	parts := []string{m.styles.title.Render("SUPREMO")}
-	parts = append(parts, m.styles.muted.Render(model), m.styles.muted.Render(workspace), credential)
+	workspaceView := m.styles.muted.Render(workspace)
+	if m.workspaceInfo.err != "" {
+		workspaceView = m.styles.warning.Render(workspace)
+	}
+	parts = append(parts, m.styles.muted.Render(model), workspaceView, credential)
 	if m.session.PlanMode {
 		parts = append(parts, m.styles.accent.Render("plan"))
 	}
@@ -66,7 +75,7 @@ func (m Model) bodyView() string {
 		return lipgloss.Place(m.width, height, lipgloss.Center, lipgloss.Center, m.executionView())
 	}
 	if m.welcomeVisible() {
-		return lipgloss.Place(m.width, height, lipgloss.Center, lipgloss.Center, m.welcomeView())
+		return lipgloss.Place(m.width, height, lipgloss.Center, lipgloss.Bottom, m.welcomeView())
 	}
 	return m.feed.View()
 }
@@ -85,32 +94,25 @@ func (m Model) welcomeVisible() bool {
 }
 
 func (m Model) welcomeView() string {
-	model := m.provider
-	if m.modelName != "" {
-		model += " · " + m.modelName
-	}
-	credential := m.styles.success.Render("● API key ready")
-	if !m.credentialReady {
-		credential = m.styles.error.Render("! API key required — run /auth <key>")
-	}
-	content := strings.Join([]string{
+	content := []string{
 		m.styles.title.Render("Welcome to Supremo"),
-		m.styles.muted.Render(model),
-		m.styles.muted.Render(m.workspace),
 		"",
-		credential,
-		"",
-		m.styles.text.Render("Describe a task below, or use a command:"),
-		m.styles.command.Render("/plan") + m.styles.muted.Render(" plan work") + "   " + m.styles.command.Render("/tools") + m.styles.muted.Render(" inspect tools") + "   " + m.styles.command.Render("/help") + m.styles.muted.Render(" all commands"),
-	}, "\n")
-	return m.styles.welcome.Width(max(20, min(m.width-6, 76))).Render(content)
+	}
+	if !m.credentialReady {
+		content = append(content, m.styles.error.Render("! API key required — run /auth <key>"), "")
+	}
+	content = append(content,
+		m.styles.text.Render("Describe a task, or start with:"),
+		m.styles.command.Render("/plan")+m.styles.muted.Render(" plan work")+"   "+m.styles.command.Render("/tools")+m.styles.muted.Render(" inspect tools")+"   "+m.styles.command.Render("/help")+m.styles.muted.Render(" all commands"),
+	)
+	return m.styles.welcome.Width(max(20, min(m.width-6, 76))).Render(strings.Join(content, "\n"))
 }
 
 func (m Model) inputView() string {
 	divider := m.styles.divider.Width(max(1, m.width-2)).Render("")
 	mode := m.approvalModeView()
 	if m.approval != nil {
-		return strings.Join([]string{divider, mode, m.styles.muted.Render("Approval controls are active above.")}, "\n")
+		return strings.Join([]string{divider, mode}, "\n")
 	}
 	if m.focusFeed {
 		return strings.Join([]string{divider, mode, m.styles.muted.Render("Transcript focused. Press Esc or Ctrl+N to return to the prompt.")}, "\n")
@@ -121,11 +123,11 @@ func (m Model) inputView() string {
 func (m Model) approvalModeView() string {
 	switch m.session.ApprovalMode {
 	case "batman":
-		return m.styles.warning.Render("BATMAN · normal work runs · risky changes ask")
+		return m.styles.warning.Render("ASK RISKY · reads run automatically · risky actions ask")
 	case "superman":
-		return m.styles.success.Render("SUPERMAN · every tool runs automatically")
+		return m.styles.error.Render("AUTO-APPROVE · tools run without confirmation")
 	default:
-		return m.styles.error.Render("STRICT · every tool asks first")
+		return m.styles.success.Render("ASK ALWAYS · every tool requires approval")
 	}
 }
 
@@ -134,10 +136,20 @@ func (m Model) footerView() string {
 		if m.approval.deciding {
 			return m.styles.footer.Render(m.spinner.View() + " submitting approval…")
 		}
-		return m.styles.footer.Render("a approve  d/esc deny  /deny <reason>")
+		return ""
 	}
 	if m.showHelp || m.showSidebar {
 		return m.styles.footer.Render("esc return to prompt")
+	}
+	if m.selection.active() {
+		hint := "release to copy selection"
+		if !m.selection.dragging {
+			hint = "selection copied"
+		}
+		if m.selection.input {
+			hint += "  ·  backspace/delete remove"
+		}
+		return m.styles.footer.Render(hint + "  ·  esc clear")
 	}
 	if m.active != nil {
 		return m.styles.footer.Render("/cancel to stop  ·  ? shortcuts")
@@ -153,9 +165,46 @@ func (m Model) footerView() string {
 		}
 	}
 	if m.feed.AtBottom() {
-		return m.styles.footer.Render(toolHint + "↑↓ chat  ·  PgUp/PgDn scroll  ·  ? shortcuts")
+		return m.styles.footer.Render(toolHint + "↑↓ scroll chat  ·  PgUp/PgDn page  ·  ? shortcuts")
 	}
-	return m.styles.footer.Render(toolHint + "↑↓ scroll  ·  End latest chat  ·  ? shortcuts")
+	return m.styles.footer.Render(toolHint + "PgUp/PgDn page  ·  End latest chat  ·  ? shortcuts")
+}
+
+func highlightSelection(view string, selection *textSelection, style lipgloss.Style) string {
+	startX, startY, endX, endY := orderedSelection(selection)
+	lines := strings.Split(view, "\n")
+	startY = max(0, startY)
+	endY = min(endY, len(lines)-1)
+	for row := startY; row <= endY; row++ {
+		width := lipgloss.Width(lines[row])
+		contentWidth := lipgloss.Width(strings.TrimRight(ansi.Strip(lines[row]), " "))
+		left, right := 0, contentWidth
+		if row == startY {
+			left = min(max(0, startX), width)
+		} else if selection.input {
+			left = min(selection.inputLeft, width)
+		}
+		if row == endY {
+			right = min(max(0, endX), width)
+		}
+		if right <= left {
+			continue
+		}
+		lines[row] = ansi.Cut(lines[row], 0, left) +
+			style.Render(ansi.Strip(ansi.Cut(lines[row], left, right))) +
+			ansi.Cut(lines[row], right, width)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func orderedSelection(selection *textSelection) (startX, startY, endX, endY int) {
+	startX, startY = selection.startX, selection.startY
+	endX, endY = selection.endX, selection.endY
+	if endY < startY || endY == startY && endX < startX {
+		startX, endX = endX, startX
+		startY, endY = endY, startY
+	}
+	return
 }
 
 func (m Model) executionView() string {
@@ -273,14 +322,45 @@ func (m Model) approvalView() string {
 	if m.approval.deciding {
 		state = "Submitting approval"
 	}
+	title, details := approvalPrompt(m.approval)
 	content := strings.Join([]string{
-		m.styles.error.Render("! " + state),
+		m.styles.warning.Render("? " + state),
 		"",
-		m.styles.title.Render(m.approval.tool),
-		m.styles.warning.Render("Mutating tool arguments:"),
-		m.styles.tool.Render(m.approval.arguments),
+		m.styles.title.Render(title),
+		m.styles.tool.Render(details),
 		"",
-		m.styles.muted.Render("a approve · d or esc deny · /deny <reason> then enter"),
+		m.styles.accent.Render("a approve once") + m.styles.muted.Render("  ·  d or esc deny"),
 	}, "\n")
-	return m.styles.modal.Width(max(20, min(m.width-10, 76))).Render(content)
+	return m.styles.modal.Width(max(20, min(m.width-10, 64))).Render(content)
+}
+
+func approvalPrompt(approval *approvalState) (title, details string) {
+	path := toolArgument(approval.arguments, "path")
+	switch approval.tool {
+	case "execute_command":
+		command := append([]string{toolArgument(approval.arguments, "command")}, toolArguments(approval.arguments, "args")...)
+		details = "$ " + strings.TrimSpace(strings.Join(command, " "))
+		if directory := toolArgument(approval.arguments, "directory"); directory != "" {
+			details += "\nWorking directory: " + directory
+		}
+		return "Run shell command?", details
+	case "write_file":
+		title = "Update file?"
+	case "create_file":
+		title = "Create file?"
+	case "delete_file":
+		title = "Delete file?"
+	case "create_directory":
+		title = "Create directory?"
+	case "rename_file":
+		return "Rename file?", toolArgument(approval.arguments, "old_path") + " → " + toolArgument(approval.arguments, "new_path")
+	case "run_formatter":
+		return "Format files?", "The formatter may update workspace files."
+	default:
+		return "Allow " + strings.ReplaceAll(approval.tool, "_", " ") + "?", safeText(approval.arguments)
+	}
+	if path == "" {
+		path = safeText(approval.arguments)
+	}
+	return title, path
 }

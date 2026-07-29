@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/AbhaySingh002/supremo/internal/agent"
 	"github.com/AbhaySingh002/supremo/internal/app"
@@ -22,6 +23,17 @@ func newTestModel(t *testing.T) Model {
 	m := New(nil, &agent.Session{ID: "test", PlanMode: true}, ctx, cancel)
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
 	return updated.(Model)
+}
+
+func renderedRow(t *testing.T, view, text string) int {
+	t.Helper()
+	for row, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, text) {
+			return row
+		}
+	}
+	t.Fatalf("rendered view is missing %q:\n%s", text, view)
+	return -1
 }
 
 func newProviderApplication(t *testing.T, apiKey string) *app.App {
@@ -78,8 +90,16 @@ func TestApprovalAndSensitiveCommandPresentation(t *testing.T) {
 	m := newTestModel(t)
 	updated, _ := m.Update(agentProgressMsg{event: agent.ProgressEvent{Kind: agent.ProgressApproval, Tool: "write_file", ToolStatus: "waiting approval", Arguments: `{"path":"secret.txt"}`}})
 	m = updated.(Model)
-	if !strings.Contains(m.View(), "Approval required") || !strings.Contains(m.View(), "write_file") {
-		t.Fatalf("approval modal did not render:\n%s", m.View())
+	view := m.View()
+	for _, want := range []string{"Approval required", "Update file?", "secret.txt", "a approve once"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("approval modal missing %q:\n%s", want, view)
+		}
+	}
+	for _, raw := range []string{"write_file", "Mutating tool arguments", `{"path":"secret.txt"}`} {
+		if strings.Contains(view, raw) {
+			t.Fatalf("approval modal leaked %q:\n%s", raw, view)
+		}
 	}
 	if got := displayCommand("/auth top-secret-key"); strings.Contains(got, "top-secret-key") {
 		t.Fatalf("sensitive command was not redacted: %q", got)
@@ -87,6 +107,17 @@ func TestApprovalAndSensitiveCommandPresentation(t *testing.T) {
 	updated, _ = newTestModel(t).Update(agentProgressMsg{event: agent.ProgressEvent{Kind: agent.ProgressApproval, Tool: "run_formatter", ToolStatus: "waiting approval"}})
 	if updated.(Model).approval == nil {
 		t.Fatal("approval modal should also open for a tool with no arguments")
+	}
+
+	updated, _ = newTestModel(t).Update(agentProgressMsg{event: agent.ProgressEvent{Kind: agent.ProgressApproval, Tool: "execute_command", ToolStatus: "waiting approval", Arguments: `{"command":"pwd"}`}})
+	view = updated.(Model).View()
+	for _, want := range []string{"Run shell command?", "$ pwd"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("command approval missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "execute_command") || strings.Contains(view, `{"command":"pwd"}`) || strings.Count(view, "approve once") != 1 {
+		t.Fatalf("command approval exposed protocol details or duplicate controls:\n%s", view)
 	}
 }
 
@@ -198,7 +229,7 @@ func TestClickPositionsComposerCursor(t *testing.T) {
 	m := newTestModel(t)
 	m.input.SetValue(strings.Join([]string{"zero", "one", "two", "three", "four", "five"}, "\n"))
 	m.resizeComposer()
-	top := lipgloss.Height(m.headerView()) + lipgloss.Height(m.bodyView()) + 4
+	top := renderedRow(t, m.View(), "two")
 	left := m.styles.input.GetPaddingLeft() + lipgloss.Width(m.input.Prompt)
 	updated, _ := m.Update(tea.MouseMsg{
 		X:      left + 2,
@@ -219,7 +250,7 @@ func TestClickPositionsComposerCursor(t *testing.T) {
 	m = updated.(Model)
 	m.input.SetValue("alpha beta gamma delta")
 	m.resizeComposer()
-	top = lipgloss.Height(m.headerView()) + lipgloss.Height(m.bodyView()) + 4
+	top = renderedRow(t, m.View(), "alpha")
 	left = m.styles.input.GetPaddingLeft() + lipgloss.Width(m.input.Prompt)
 	updated, _ = m.Update(tea.MouseMsg{
 		X:      left + 2,
@@ -230,6 +261,88 @@ func TestClickPositionsComposerCursor(t *testing.T) {
 	m = updated.(Model)
 	if info := m.input.LineInfo(); info.RowOffset != 1 || info.CharOffset != 2 {
 		t.Fatalf("clicked wrapped position = row %d, column %d; want row 1, column 2", info.RowOffset, info.CharOffset)
+	}
+}
+
+func TestDragSelectsCopiesAndDeletesComposerText(t *testing.T) {
+	m := newTestModel(t)
+	m.input.SetValue("alpha\nbeta")
+	m.resizeComposer()
+	left := m.styles.input.GetPaddingLeft() + lipgloss.Width(m.input.Prompt)
+	startY := renderedRow(t, m.View(), "alpha")
+	endY := renderedRow(t, m.View(), "beta")
+
+	updated, _ := m.Update(tea.MouseMsg{
+		X:      left + 2,
+		Y:      startY,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+	})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.MouseMsg{
+		X:      left + 2,
+		Y:      endY,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionMotion,
+	})
+	m = updated.(Model)
+	if got := m.selectedText(); got != "pha\nbe" {
+		t.Fatalf("selected composer text = %q, want %q", got, "pha\nbe")
+	}
+	if !strings.Contains(m.View(), "release to copy selection") ||
+		!strings.Contains(m.View(), m.styles.selection.Render("pha")) {
+		t.Fatalf("selection is not visibly active:\n%s", m.View())
+	}
+
+	updated, cmd := m.Update(tea.MouseMsg{
+		X:      left + 2,
+		Y:      endY,
+		Button: tea.MouseButtonNone,
+		Action: tea.MouseActionRelease,
+	})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("releasing a selection should copy it")
+	}
+	if !strings.Contains(m.View(), "selection copied") {
+		t.Fatalf("released selection lacks copy feedback:\n%s", m.View())
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m = updated.(Model)
+	if got := m.input.Value(); got != "alta" {
+		t.Fatalf("composer after deleting selection = %q, want %q", got, "alta")
+	}
+	if m.selection != nil {
+		t.Fatal("deleting selected text should clear the selection")
+	}
+}
+
+func TestDragSelectsChatText(t *testing.T) {
+	m := newTestModel(t)
+	m.appendEntry(entryAssistant, "copy this line")
+	row := renderedRow(t, m.View(), "copy this line")
+	line := strings.Split(m.View(), "\n")[row]
+	left := strings.Index(ansi.Strip(line), "copy")
+
+	updated, _ := m.Update(tea.MouseMsg{
+		X:      left,
+		Y:      row,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+	})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.MouseMsg{
+		X:      left + 4,
+		Y:      row,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionMotion,
+	})
+	m = updated.(Model)
+	if got := m.selectedText(); got != "copy" {
+		t.Fatalf("selected chat text = %q, want %q", got, "copy")
+	}
+	if !strings.Contains(m.View(), "release to copy selection") {
+		t.Fatalf("chat selection is not visibly active:\n%s", m.View())
 	}
 }
 
@@ -271,12 +384,16 @@ func TestPlanResumeStartsAnInteractiveTask(t *testing.T) {
 func TestApprovalModeAppearsAboveComposer(t *testing.T) {
 	m := newTestModel(t)
 	m.session.ApprovalMode = "batman"
-	if !strings.Contains(m.View(), "BATMAN · normal work runs · risky changes ask") {
+	if !strings.Contains(m.View(), "ASK RISKY · reads run automatically · risky actions ask") {
 		t.Fatalf("missing batman safety label:\n%s", m.View())
 	}
 	m.session.ApprovalMode = "superman"
-	if !strings.Contains(m.View(), "SUPERMAN · every tool runs automatically") {
+	if !strings.Contains(m.View(), "AUTO-APPROVE · tools run without confirmation") {
 		t.Fatalf("missing superman safety label:\n%s", m.View())
+	}
+	m.session.ApprovalMode = "strict"
+	if !strings.Contains(m.View(), "ASK ALWAYS · every tool requires approval") {
+		t.Fatalf("missing strict safety label:\n%s", m.View())
 	}
 }
 
@@ -321,9 +438,15 @@ func TestToolOutputStaysCollapsedUntilClicked(t *testing.T) {
 	}
 	updated, _ := m.Update(tea.MouseMsg{
 		X:      0,
-		Y:      lipgloss.Height(m.headerView()) + 1,
+		Y:      renderedRow(t, m.View(), "Tool · Checking workspace…"),
 		Button: tea.MouseButtonLeft,
 		Action: tea.MouseActionPress,
+	})
+	updated, _ = updated.(Model).Update(tea.MouseMsg{
+		X:      0,
+		Y:      renderedRow(t, updated.(Model).View(), "Tool · Checking workspace…"),
+		Button: tea.MouseButtonNone,
+		Action: tea.MouseActionRelease,
 	})
 	m = updated.(Model)
 	if view := m.View(); !strings.Contains(view, "workspace-output") {
@@ -331,12 +454,26 @@ func TestToolOutputStaysCollapsedUntilClicked(t *testing.T) {
 	}
 	updated, _ = m.Update(tea.MouseMsg{
 		X:      0,
-		Y:      lipgloss.Height(m.headerView()) + 1,
+		Y:      renderedRow(t, m.View(), "Tool · Checking workspace…"),
 		Button: tea.MouseButtonLeft,
 		Action: tea.MouseActionPress,
 	})
+	updated, _ = updated.(Model).Update(tea.MouseMsg{
+		X:      0,
+		Y:      renderedRow(t, updated.(Model).View(), "Tool · Checking workspace…"),
+		Button: tea.MouseButtonNone,
+		Action: tea.MouseActionRelease,
+	})
 	if strings.Contains(updated.(Model).View(), "workspace-output") {
 		t.Fatal("clicking an open tool row should collapse its output")
+	}
+}
+
+func TestShortTranscriptStaysAboveComposer(t *testing.T) {
+	m := newTestModel(t)
+	m.appendEntry(entryUser, "terminal-line")
+	if row := renderedRow(t, m.bodyView(), "terminal-line"); row != m.feed.Height-1 {
+		t.Fatalf("short transcript ended on row %d, want %d:\n%s", row, m.feed.Height-1, m.bodyView())
 	}
 }
 

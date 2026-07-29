@@ -76,6 +76,25 @@ type workspaceState struct {
 	err     string
 }
 
+type textSelection struct {
+	startX, startY int
+	endX, endY     int
+	anchor, head   int
+	inputLeft      int
+	input          bool
+	dragging       bool
+}
+
+func (s *textSelection) active() bool {
+	if s == nil {
+		return false
+	}
+	if s.input {
+		return s.anchor != s.head
+	}
+	return s.startX != s.endX || s.startY != s.endY
+}
+
 type keyMap struct {
 	submit          key.Binding
 	newline         key.Binding
@@ -123,7 +142,9 @@ type Model struct {
 	height       int
 	input        textarea.Model
 	inputOffset  int
+	selection    *textSelection
 	feed         viewport.Model
+	feedPadding  int
 	palette      list.Model
 	spinner      spinner.Model
 	initialFocus tea.Cmd
@@ -276,6 +297,7 @@ func (m *Model) layout() {
 func (m *Model) resetComposer() {
 	m.input.Reset()
 	m.inputOffset = 0
+	m.selection = nil
 	m.input.SetHeight(1)
 	m.layout()
 }
@@ -333,6 +355,7 @@ func (m *Model) realignComposer() {
 	line := m.input.Line()
 	_, cursorRow := composerMetrics(m.input)
 	cursorColumn := m.input.LineInfo().StartColumn + m.input.LineInfo().ColumnOffset
+	m.input.View()
 	moveComposerCursor(&m.input, 0)
 	m.input.CursorStart()
 	m.input, _ = m.input.Update(nil)
@@ -442,7 +465,9 @@ func (m *Model) rebuildFeed() {
 		out.WriteString(m.renderEntry(index, entry))
 		out.WriteString("\n\n")
 	}
-	m.feed.SetContent(strings.TrimSpace(out.String()))
+	content := strings.TrimSpace(out.String())
+	m.feedPadding = max(0, m.feed.Height-lipgloss.Height(content))
+	m.feed.SetContent(strings.Repeat("\n", m.feedPadding) + content)
 	if atBottom {
 		m.feed.GotoBottom()
 	}
@@ -624,7 +649,7 @@ func workspaceStatusCmd(ctx context.Context, workspace string) tea.Cmd {
 func markdownCmd(run, width int, entries []transcriptEntry) tea.Cmd {
 	return func() tea.Msg {
 		rendered := make(map[int]string)
-		renderer, err := glamour.NewTermRenderer(glamour.WithStandardStyle(glamourstyles.DarkStyle), glamour.WithColorProfile(lipgloss.ColorProfile()), glamour.WithWordWrap(max(20, width-4)))
+		renderer, err := glamour.NewTermRenderer(glamour.WithStandardStyle(glamourstyles.DarkStyle), glamour.WithColorProfile(lipgloss.ColorProfile()), glamour.WithWordWrap(min(88, max(20, width-4))))
 		if err != nil {
 			return markdownRenderedMsg{run: run, rendered: rendered}
 		}

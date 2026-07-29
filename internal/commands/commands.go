@@ -503,11 +503,11 @@ func setApprovalMode(session *agent.Session, mode tools.ApprovalMode, args []str
 	}
 	switch mode {
 	case tools.ApprovalBatman:
-		return "Batman mode enabled — normal work runs; destructive, dependency, and risky commands ask first.", nil
+		return "Ask risky enabled — reads and routine checks run automatically; risky actions ask first.", nil
 	case tools.ApprovalSuperman:
-		return "Superman mode enabled — every tool is approved automatically.", nil
+		return "Auto-approve enabled — tools can run without confirmation.", nil
 	default:
-		return "Strict mode enabled — every tool asks first.", nil
+		return "Ask always enabled — every tool requires approval.", nil
 	}
 }
 
