@@ -13,9 +13,9 @@ The release tag and `VERSION` must match. Prepare both on `main` before pushing 
 ```sh
 git pull --ff-only origin main
 printf 'vX.Y.Z\n' > VERSION
-git add VERSION <release-changes>
-git commit -m "release: vX.Y.Z"
-git tag -a vX.Y.Z -m "vX.Y.Z"
+git add .
+git commit -m "what Fixed.  Not the version release name ."
+git tag -a vX.Y.Z
 git push origin main --follow-tags
 ```
 
