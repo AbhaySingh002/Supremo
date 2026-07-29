@@ -214,6 +214,19 @@ func TestComposerStartsSingleLineAndSupportsNewlineBindings(t *testing.T) {
 	}
 }
 
+func TestAppleTerminalShiftEnterUsesNewlineBinding(t *testing.T) {
+	msg := tea.KeyMsg{Type: tea.KeyEnter}
+	if !appleTerminalShiftEnter(msg, "Apple_Terminal", true) {
+		t.Fatal("Shift+Enter in Apple Terminal should use the newline binding")
+	}
+	if appleTerminalShiftEnter(msg, "Apple_Terminal", false) {
+		t.Fatal("plain Enter in Apple Terminal must still submit")
+	}
+	if appleTerminalShiftEnter(msg, "iTerm.app", true) {
+		t.Fatal("the native fallback must not rewrite input from other terminals")
+	}
+}
+
 func TestComposerWrapsAndKeepsNewLinesVisible(t *testing.T) {
 	m := newTestModel(t)
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 30, Height: 24})

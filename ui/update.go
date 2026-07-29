@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"os"
 	"strings"
 
 	"github.com/atotto/clipboard"
@@ -245,6 +246,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	terminal := os.Getenv("TERM_PROGRAM")
+	if msg.Type == tea.KeyEnter && terminal == "Apple_Terminal" &&
+		appleTerminalShiftEnter(msg, terminal, nativeShiftPressed()) {
+		msg.Alt = true // Reuse the textarea's existing Alt+Enter newline path.
+	}
 	if m.selection != nil {
 		if msg.Type == tea.KeyEsc {
 			m.selection = nil
@@ -342,7 +348,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.paletteOpen && key.Matches(msg, m.keys.complete) {
 		return m.completeSelectedCommand()
 	}
-	if m.paletteOpen && msg.Type == tea.KeyEnter && !m.exactCommandInput() {
+	if m.paletteOpen && key.Matches(msg, m.keys.submit) && !m.exactCommandInput() {
 		return m.completeSelectedCommand()
 	}
 	if key.Matches(msg, m.keys.submit) {
@@ -362,6 +368,10 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.historyDraft = ""
 	}
 	return m, tea.Batch(cmd, m.updatePalette())
+}
+
+func appleTerminalShiftEnter(msg tea.KeyMsg, terminal string, shiftPressed bool) bool {
+	return terminal == "Apple_Terminal" && msg.Type == tea.KeyEnter && !msg.Alt && shiftPressed
 }
 
 func (m Model) scrollTranscript(msg tea.Msg) (tea.Model, tea.Cmd) {

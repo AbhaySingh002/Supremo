@@ -297,7 +297,7 @@ func (m Model) helpView() string {
 		m.styles.title.Render("SHORTCUTS"),
 		"",
 		"Enter  send task or command",
-		"Alt+Enter / Ctrl+J  add a line",
+		"Shift+Enter / Alt+Enter / Ctrl+J  add a line",
 		"/  open commands",
 		"↑↓  browse request history",
 		"PgUp/PgDn  page through chat · End latest",
