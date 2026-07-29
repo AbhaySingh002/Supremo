@@ -83,6 +83,7 @@ type textSelection struct {
 	inputLeft      int
 	input          bool
 	dragging       bool
+	copied         bool
 }
 
 func (s *textSelection) active() bool {
@@ -142,6 +143,9 @@ type Model struct {
 	height       int
 	input        textarea.Model
 	inputOffset  int
+	inputHistory []string
+	historyIndex int
+	historyDraft string
 	selection    *textSelection
 	feed         viewport.Model
 	feedPadding  int
@@ -297,6 +301,8 @@ func (m *Model) layout() {
 func (m *Model) resetComposer() {
 	m.input.Reset()
 	m.inputOffset = 0
+	m.historyIndex = len(m.inputHistory)
+	m.historyDraft = ""
 	m.selection = nil
 	m.input.SetHeight(1)
 	m.layout()

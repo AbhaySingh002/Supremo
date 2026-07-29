@@ -75,7 +75,7 @@ func (m Model) bodyView() string {
 		return lipgloss.Place(m.width, height, lipgloss.Center, lipgloss.Center, m.executionView())
 	}
 	if m.welcomeVisible() {
-		return lipgloss.Place(m.width, height, lipgloss.Center, lipgloss.Bottom, m.welcomeView())
+		return lipgloss.Place(m.width, height, lipgloss.Center, lipgloss.Center, m.welcomeView())
 	}
 	return m.feed.View()
 }
@@ -142,9 +142,12 @@ func (m Model) footerView() string {
 		return m.styles.footer.Render("esc return to prompt")
 	}
 	if m.selection.active() {
-		hint := "release to copy selection"
+		hint := "selecting"
 		if !m.selection.dragging {
-			hint = "selection copied"
+			hint = "ctrl+c copy"
+		}
+		if m.selection.copied {
+			hint = "copied"
 		}
 		if m.selection.input {
 			hint += "  ·  backspace/delete remove"
@@ -165,7 +168,7 @@ func (m Model) footerView() string {
 		}
 	}
 	if m.feed.AtBottom() {
-		return m.styles.footer.Render(toolHint + "↑↓ scroll chat  ·  PgUp/PgDn page  ·  ? shortcuts")
+		return m.styles.footer.Render(toolHint + "↑↓ request history  ·  PgUp/PgDn chat  ·  ? shortcuts")
 	}
 	return m.styles.footer.Render(toolHint + "PgUp/PgDn page  ·  End latest chat  ·  ? shortcuts")
 }

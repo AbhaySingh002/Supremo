@@ -84,6 +84,20 @@ func TestWelcomeGuidesCredentialSetupAndWideStreamHasNoRail(t *testing.T) {
 	if strings.Contains(view, "EXECUTION") {
 		t.Fatalf("execution must remain an overlay, not a permanent rail:\n%s", view)
 	}
+	lines := strings.Split(ansi.Strip(m.bodyView()), "\n")
+	first, last := -1, -1
+	for row, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			if first == -1 {
+				first = row
+			}
+			last = row
+		}
+	}
+	top, bottom := first, len(lines)-1-last
+	if top-bottom > 1 || bottom-top > 1 {
+		t.Fatalf("welcome is not vertically centered: top margin %d, bottom margin %d", top, bottom)
+	}
 }
 
 func TestApprovalAndSensitiveCommandPresentation(t *testing.T) {
@@ -152,6 +166,9 @@ func TestComposerAcceptsTasksAndStartsWork(t *testing.T) {
 	}
 	if len(m.entries) == 0 || m.entries[len(m.entries)-1].content != "inspect the current package" {
 		t.Fatal("submitted task should appear in the transcript")
+	}
+	if len(m.inputHistory) != 1 || m.inputHistory[0] != "inspect the current package" {
+		t.Fatalf("submitted task was not remembered: %#v", m.inputHistory)
 	}
 }
 
@@ -264,7 +281,7 @@ func TestClickPositionsComposerCursor(t *testing.T) {
 	}
 }
 
-func TestDragSelectsCopiesAndDeletesComposerText(t *testing.T) {
+func TestDragSelectsAndDeletesComposerTextWithoutAutoCopy(t *testing.T) {
 	m := newTestModel(t)
 	m.input.SetValue("alpha\nbeta")
 	m.resizeComposer()
@@ -289,23 +306,24 @@ func TestDragSelectsCopiesAndDeletesComposerText(t *testing.T) {
 	if got := m.selectedText(); got != "pha\nbe" {
 		t.Fatalf("selected composer text = %q, want %q", got, "pha\nbe")
 	}
-	if !strings.Contains(m.View(), "release to copy selection") ||
+	if !strings.Contains(m.View(), "selecting") ||
 		!strings.Contains(m.View(), m.styles.selection.Render("pha")) {
 		t.Fatalf("selection is not visibly active:\n%s", m.View())
 	}
 
-	updated, cmd := m.Update(tea.MouseMsg{
+	updated, _ = m.Update(tea.MouseMsg{
 		X:      left + 2,
 		Y:      endY,
 		Button: tea.MouseButtonNone,
 		Action: tea.MouseActionRelease,
 	})
 	m = updated.(Model)
-	if cmd == nil {
-		t.Fatal("releasing a selection should copy it")
+	if m.selection == nil || m.selection.copied || !strings.Contains(m.View(), "ctrl+c copy") {
+		t.Fatalf("released selection should remain selected without copying:\n%s", m.View())
 	}
-	if !strings.Contains(m.View(), "selection copied") {
-		t.Fatalf("released selection lacks copy feedback:\n%s", m.View())
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("ctrl+c should copy an active selection")
 	}
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
 	m = updated.(Model)
@@ -341,8 +359,53 @@ func TestDragSelectsChatText(t *testing.T) {
 	if got := m.selectedText(); got != "copy" {
 		t.Fatalf("selected chat text = %q, want %q", got, "copy")
 	}
-	if !strings.Contains(m.View(), "release to copy selection") {
+	if !strings.Contains(m.View(), "selecting") {
 		t.Fatalf("chat selection is not visibly active:\n%s", m.View())
+	}
+	updated, _ = m.Update(tea.MouseMsg{
+		X:      left + 4,
+		Y:      row,
+		Button: tea.MouseButtonNone,
+		Action: tea.MouseActionRelease,
+	})
+	m = updated.(Model)
+	if m.selection == nil || m.selection.copied || !strings.Contains(m.View(), "ctrl+c copy") {
+		t.Fatalf("released chat selection should remain selected without copying:\n%s", m.View())
+	}
+}
+
+func TestArrowKeysRecallRequestHistory(t *testing.T) {
+	m := newTestModel(t)
+	m.rememberInput("first request")
+	m.rememberInput("second request")
+	m.rememberInput("/auth secret")
+	if len(m.inputHistory) != 2 {
+		t.Fatalf("sensitive commands must not enter request history: %#v", m.inputHistory)
+	}
+	m.input.SetValue("draft")
+
+	for _, step := range []struct {
+		key  tea.KeyType
+		want string
+	}{
+		{tea.KeyUp, "second request"},
+		{tea.KeyUp, "first request"},
+		{tea.KeyDown, "second request"},
+		{tea.KeyDown, "draft"},
+	} {
+		updated, _ := m.Update(tea.KeyMsg{Type: step.key})
+		m = updated.(Model)
+		if got := m.input.Value(); got != step.want {
+			t.Fatalf("%v recalled %q, want %q", step.key, got, step.want)
+		}
+	}
+
+	m.input.SetValue("line one\nline two")
+	m.historyIndex = len(m.inputHistory)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = updated.(Model)
+	if got := m.input.Value(); got != "line one\nline two" || m.input.Line() != 0 {
+		t.Fatalf("up inside multiline input should move the cursor first, got value %q line %d", got, m.input.Line())
 	}
 }
 

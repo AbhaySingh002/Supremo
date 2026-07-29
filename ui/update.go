@@ -97,8 +97,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case selectionCopiedMsg:
 		if msg.err != nil {
-			m.selection = nil
 			m.appendEntry(entryError, "Copy failed: "+msg.err.Error())
+		} else if m.selection != nil {
+			m.selection.copied = true
 		}
 		return m, nil
 	case pulseMsg:
@@ -313,6 +314,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.palette, cmd = m.palette.Update(msg)
 		return m, cmd
 	}
+	if handled, cmd := m.navigateInputHistory(msg); handled {
+		return m, cmd
+	}
 	if m.paletteOpen && key.Matches(msg, m.keys.complete) {
 		return m.completeSelectedCommand()
 	}
@@ -327,9 +331,14 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.layout()
 		return m, nil
 	}
+	value := m.input.Value()
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	m.resizeComposer()
+	if m.input.Value() != value {
+		m.historyIndex = len(m.inputHistory)
+		m.historyDraft = ""
+	}
 	return m, tea.Batch(cmd, m.updatePalette())
 }
 
@@ -353,16 +362,52 @@ func transcriptNavigation(msg tea.KeyMsg, input string) bool {
 	switch msg.Type {
 	case tea.KeyPgUp, tea.KeyPgDown:
 		return true
-	case tea.KeyUp, tea.KeyDown, tea.KeyHome, tea.KeyEnd:
+	case tea.KeyHome, tea.KeyEnd:
 		return strings.TrimSpace(input) == ""
 	default:
 		return false
 	}
 }
 
+func (m *Model) navigateInputHistory(msg tea.KeyMsg) (bool, tea.Cmd) {
+	if len(m.inputHistory) == 0 || msg.Type != tea.KeyUp && msg.Type != tea.KeyDown {
+		return false, nil
+	}
+	navigating := m.historyIndex < len(m.inputHistory)
+	switch msg.Type {
+	case tea.KeyUp:
+		info := m.input.LineInfo()
+		if !navigating && (m.input.Line() != 0 || info.RowOffset != 0) {
+			return false, nil
+		}
+		if m.historyIndex == len(m.inputHistory) {
+			m.historyDraft = m.input.Value()
+		}
+		if m.historyIndex == 0 {
+			return true, nil
+		}
+		m.historyIndex--
+	case tea.KeyDown:
+		if !navigating {
+			return false, nil
+		}
+		m.historyIndex++
+	}
+	value := m.historyDraft
+	if m.historyIndex < len(m.inputHistory) {
+		value = m.inputHistory[m.historyIndex]
+	}
+	m.input.SetValue(value)
+	m.paletteOpen = false
+	m.resizeComposer()
+	return true, m.input.Focus()
+}
+
 func (m Model) completeSelectedCommand() (tea.Model, tea.Cmd) {
 	if item, ok := m.palette.SelectedItem().(commandItem); ok {
 		m.input.SetValue(item.command.Name + " ")
+		m.historyIndex = len(m.inputHistory)
+		m.historyDraft = ""
 		m.resizeComposer()
 		return m, tea.Batch(m.input.Focus(), m.updatePalette())
 	}
@@ -434,6 +479,7 @@ func (m Model) submitInput() (tea.Model, tea.Cmd) {
 	if input == "" {
 		return m, nil
 	}
+	m.rememberInput(input)
 	if m.active != nil {
 		switch {
 		case commandIs(input, "/cancel"):
@@ -469,6 +515,17 @@ func (m Model) submitInput() (tea.Model, tea.Cmd) {
 		return m, m.startCommand(input)
 	}
 	return m, m.startTask(input, false)
+}
+
+func (m *Model) rememberInput(input string) {
+	if input == "" || commandIs(input, "/auth") {
+		return
+	}
+	if len(m.inputHistory) == 0 || m.inputHistory[len(m.inputHistory)-1] != input {
+		m.inputHistory = append(m.inputHistory, input)
+	}
+	m.historyIndex = len(m.inputHistory)
+	m.historyDraft = ""
 }
 
 func (m *Model) updatePalette() tea.Cmd {
@@ -686,14 +743,14 @@ func (m *Model) updateMouseSelection(msg tea.MouseMsg) (bool, tea.Cmd) {
 				selection.head = composerCursorOffset(m.input)
 			}
 			if selection.active() {
-				return true, tea.Batch(cmd, copySelectionCmd(m.selectedText()))
+				return true, cmd
 			}
 		} else {
 			selection.endX, selection.endY = msg.X, msg.Y
 			if selection.active() {
 				text := m.selectedText()
 				if text != "" {
-					return true, copySelectionCmd(text)
+					return true, nil
 				}
 				m.selection = nil
 				return true, nil
@@ -816,6 +873,8 @@ func (m *Model) deleteInputSelection() {
 		offset -= width + 1
 	}
 	m.selection = nil
+	m.historyIndex = len(m.inputHistory)
+	m.historyDraft = ""
 	m.resizeComposer()
 }
 

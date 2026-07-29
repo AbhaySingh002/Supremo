@@ -63,7 +63,7 @@ func newStyles() styles {
 		user:                       base.Bold(true).Foreground(coral),
 		tool:                       base.Foreground(fg),
 		input:                      base.Foreground(fg).PaddingLeft(1),
-		selection:                  base.Foreground(charcoal).Background(coral),
+		selection:                  base.Foreground(charcoal).Background(fg),
 		composerBase:               base.Foreground(fg),
 		footer:                     base.Foreground(muted).Padding(0, 1),
 		divider:                    base.BorderTop(true).BorderStyle(lipgloss.NormalBorder()).BorderForeground(border),
