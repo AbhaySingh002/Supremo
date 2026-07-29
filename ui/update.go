@@ -54,6 +54,10 @@ type markdownRenderedMsg struct {
 type pulseMsg struct{}
 type heroStatusMsg struct{ taskID int }
 type selectionCopiedMsg struct{ err error }
+type clipboardPasteMsg struct {
+	text string
+	err  error
+}
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -80,6 +84,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, heroStatusCmd(msg.taskID)
 	case tea.MouseMsg:
+		if m.sendButtonHit(msg) {
+			if strings.TrimSpace(m.input.Value()) == "" {
+				return m, nil
+			}
+			return m.submitInput()
+		}
 		if handled, cmd := m.updateMouseSelection(msg); handled {
 			return m, cmd
 		}
@@ -102,6 +112,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selection.copied = true
 		}
 		return m, nil
+	case clipboardPasteMsg:
+		if msg.err != nil {
+			m.appendEntry(entryError, "Paste failed: "+msg.err.Error())
+			return m, nil
+		}
+		return m, tea.Batch(m.insertPastedText(msg.text), m.updatePalette())
 	case pulseMsg:
 		if !m.pulseEnabled {
 			return m, nil
@@ -305,6 +321,12 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.feed, cmd = m.feed.Update(msg)
 		return m, cmd
+	}
+	if msg.Paste {
+		return m, tea.Batch(m.insertPastedText(string(msg.Runes)), m.updatePalette())
+	}
+	if key.Matches(msg, m.input.KeyMap.Paste) {
+		return m, clipboardPasteCmd()
 	}
 	if transcriptNavigation(msg, m.input.Value()) {
 		return m.scrollTranscript(msg)
@@ -715,14 +737,17 @@ func (m *Model) updateMouseSelection(msg tea.MouseMsg) (bool, tea.Cmd) {
 		if handled {
 			m.selection.input = true
 			m.selection.inputLeft = m.styles.input.GetPaddingLeft() + lipgloss.Width(m.input.Prompt)
+			m.selection.inputTop = m.composerTop()
+			m.selection.inputBottom = m.selection.inputTop + m.input.Height() - 1
 			m.selection.anchor = composerCursorOffset(m.input)
 			m.selection.head = m.selection.anchor
 		}
 		return true, cmd
 	case msg.Action == tea.MouseActionMotion && m.selection != nil && m.selection.dragging:
 		if m.selection.input {
-			if handled, cmd := m.positionComposerCursor(msg); handled {
-				m.selection.endX, m.selection.endY = msg.X, msg.Y
+			target, handled, cmd := m.positionComposerDragCursor(msg)
+			if handled {
+				m.selection.endX, m.selection.endY = target.X, target.Y
 				m.selection.head = composerCursorOffset(m.input)
 				return true, cmd
 			}
@@ -737,9 +762,9 @@ func (m *Model) updateMouseSelection(msg tea.MouseMsg) (bool, tea.Cmd) {
 			drag := msg
 			drag.Button = tea.MouseButtonLeft
 			drag.Action = tea.MouseActionMotion
-			handled, cmd := m.positionComposerCursor(drag)
+			target, handled, cmd := m.positionComposerDragCursor(drag)
 			if handled {
-				selection.endX, selection.endY = msg.X, msg.Y
+				selection.endX, selection.endY = target.X, target.Y
 				selection.head = composerCursorOffset(m.input)
 			}
 			if selection.active() {
@@ -764,12 +789,53 @@ func (m *Model) updateMouseSelection(msg tea.MouseMsg) (bool, tea.Cmd) {
 	return false, nil
 }
 
+func (m Model) sendButtonHit(msg tea.MouseMsg) bool {
+	if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress ||
+		m.approval != nil || m.showHelp || m.showSidebar || m.focusFeed {
+		return false
+	}
+	for row, line := range strings.Split(m.View(), "\n") {
+		plain := ansi.Strip(line)
+		for _, label := range []string{"[ send — ]", "[ send ↵ ]"} {
+			if index := strings.Index(plain, label); row == msg.Y && index >= 0 {
+				left := lipgloss.Width(plain[:index])
+				return msg.X >= left && msg.X < left+lipgloss.Width(label)
+			}
+		}
+	}
+	return false
+}
+
+func (m Model) composerTop() int {
+	return lipgloss.Height(m.View()) - lipgloss.Height(m.footerView()) - m.input.Height()
+}
+
+func (m *Model) positionComposerDragCursor(msg tea.MouseMsg) (tea.MouseMsg, bool, tea.Cmd) {
+	top := m.composerTop()
+	bottom := top + m.input.Height() - 1
+	rows, _ := composerMetrics(m.input)
+	oldOffset := m.inputOffset
+	if msg.Y < top {
+		m.inputOffset = max(0, m.inputOffset-1)
+		msg.Y = top
+	} else if msg.Y > bottom {
+		m.inputOffset = min(max(0, rows-m.input.Height()), m.inputOffset+1)
+		msg.Y = bottom
+	}
+	msg.X = min(max(0, msg.X), m.width-1)
+	handled, cmd := m.positionComposerCursor(msg)
+	if handled && m.selection != nil {
+		m.selection.startY -= m.inputOffset - oldOffset
+	}
+	return msg, handled, cmd
+}
+
 func (m *Model) positionComposerCursor(msg tea.MouseMsg) (bool, tea.Cmd) {
 	if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress && msg.Action != tea.MouseActionMotion ||
 		m.approval != nil || m.showHelp || m.showSidebar || m.focusFeed {
 		return false, nil
 	}
-	top := lipgloss.Height(m.View()) - lipgloss.Height(m.footerView()) - m.input.Height()
+	top := m.composerTop()
 	row := msg.Y - top
 	if msg.X < 0 || msg.X >= m.width || row < 0 || row >= m.input.Height() {
 		return false, nil
@@ -844,6 +910,25 @@ func copySelectionCmd(text string) tea.Cmd {
 	return func() tea.Msg {
 		return selectionCopiedMsg{err: clipboard.WriteAll(text)}
 	}
+}
+
+func clipboardPasteCmd() tea.Cmd {
+	return func() tea.Msg {
+		text, err := clipboard.ReadAll()
+		return clipboardPasteMsg{text: text, err: err}
+	}
+}
+
+func (m *Model) insertPastedText(text string) tea.Cmd {
+	text = strings.ToValidUTF8(ansi.Strip(text), "")
+	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+	m.input.InsertString(text)
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(nil)
+	m.historyIndex = len(m.inputHistory)
+	m.historyDraft = ""
+	m.resizeComposer()
+	return cmd
 }
 
 func selectionDeleteKey(msg tea.KeyMsg, input textarea.Model) bool {

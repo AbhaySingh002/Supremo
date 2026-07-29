@@ -195,7 +195,7 @@ func TestProviderReadinessControlsTaskStart(t *testing.T) {
 	}
 }
 
-func TestComposerStartsSingleLineAndGrowsForAltEnter(t *testing.T) {
+func TestComposerStartsSingleLineAndSupportsNewlineBindings(t *testing.T) {
 	m := newTestModel(t)
 	if got := m.input.Height(); got != 1 {
 		t.Fatalf("initial composer height = %d, want 1", got)
@@ -206,6 +206,11 @@ func TestComposerStartsSingleLineAndGrowsForAltEnter(t *testing.T) {
 	m = updated.(Model)
 	if got := m.input.Height(); got != 2 {
 		t.Fatalf("composer height after Alt+Enter = %d, want 2", got)
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m = updated.(Model)
+	if got := m.input.Height(); got != 3 {
+		t.Fatalf("composer height after Ctrl+J = %d, want 3", got)
 	}
 }
 
@@ -239,6 +244,88 @@ func TestComposerWrapsAndKeepsNewLinesVisible(t *testing.T) {
 	}
 	if got := m.input.LineCount(); got != 7 {
 		t.Fatalf("composer line count = %d, want 7", got)
+	}
+	rows, cursorRow := composerMetrics(m.input)
+	if m.inputOffset == 0 || cursorRow < m.inputOffset || cursorRow >= m.inputOffset+m.input.Height() {
+		t.Fatalf("composer did not keep cursor visible: rows=%d cursor=%d offset=%d height=%d", rows, cursorRow, m.inputOffset, m.input.Height())
+	}
+	if !strings.Contains(m.composerView(), "┃") {
+		t.Fatalf("overflowing composer has no scroll indicator:\n%s", m.composerView())
+	}
+}
+
+func TestComposerSendStateAndPlainTextPaste(t *testing.T) {
+	m := newTestModel(t)
+	if !strings.Contains(ansi.Strip(m.View()), "[ send — ]") {
+		t.Fatalf("empty composer does not show disabled send state:\n%s", m.View())
+	}
+	m.input.SetValue("   ")
+	if !strings.Contains(ansi.Strip(m.View()), "[ send — ]") {
+		t.Fatalf("whitespace-only composer should keep send disabled:\n%s", m.View())
+	}
+	m.input.Reset()
+	updated, _ := m.Update(tea.KeyMsg{
+		Type:  tea.KeyRunes,
+		Runes: []rune("\x1b[31mhello\x1b[0m"),
+		Paste: true,
+	})
+	m = updated.(Model)
+	if got := m.input.Value(); got != "hello" {
+		t.Fatalf("formatted paste = %q, want plain text", got)
+	}
+	view := m.View()
+	for row, line := range strings.Split(view, "\n") {
+		if width := lipgloss.Width(line); width > m.width {
+			t.Fatalf("view row %d width = %d, terminal width = %d", row, width, m.width)
+		}
+	}
+	row := renderedRow(t, view, "send")
+	line := ansi.Strip(strings.Split(view, "\n")[row])
+	index := strings.Index(line, "[ send ↵ ]")
+	if index < 0 {
+		t.Fatalf("non-empty composer does not show enabled send state:\n%s", view)
+	}
+	updated, _ = m.Update(tea.MouseMsg{
+		X:      lipgloss.Width(line[:index]) + 1,
+		Y:      row,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+	})
+	m = updated.(Model)
+	if m.active == nil {
+		t.Fatal("clicking the enabled send button should submit the request")
+	}
+}
+
+func TestSelectionDragScrollsComposerPastVisibleEdge(t *testing.T) {
+	m := newTestModel(t)
+	m.input.SetValue(strings.Join([]string{"zero", "one", "two", "three", "four", "five", "six", "seven"}, "\n"))
+	m.resizeComposer()
+	if m.inputOffset != 4 {
+		t.Fatalf("initial composer offset = %d, want 4", m.inputOffset)
+	}
+	top := m.composerTop()
+	bottom := top + m.input.Height() - 1
+	left := m.styles.input.GetPaddingLeft() + lipgloss.Width(m.input.Prompt)
+	updated, _ := m.Update(tea.MouseMsg{
+		X:      left + 2,
+		Y:      bottom,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+	})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.MouseMsg{
+		X:      left,
+		Y:      top - 1,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionMotion,
+	})
+	m = updated.(Model)
+	if m.inputOffset != 3 {
+		t.Fatalf("dragging above composer offset = %d, want 3", m.inputOffset)
+	}
+	if got := m.selectedText(); !strings.HasPrefix(got, "three") || !strings.HasSuffix(got, "se") {
+		t.Fatalf("drag selection did not extend through scrolled content: %q", got)
 	}
 }
 

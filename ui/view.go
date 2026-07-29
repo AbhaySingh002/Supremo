@@ -117,7 +117,41 @@ func (m Model) inputView() string {
 	if m.focusFeed {
 		return strings.Join([]string{divider, mode, m.styles.muted.Render("Transcript focused. Press Esc or Ctrl+N to return to the prompt.")}, "\n")
 	}
-	return strings.Join([]string{divider, mode, m.styles.input.Width(max(1, m.width-2)).Render(m.input.View())}, "\n")
+	button := m.sendButtonView()
+	if gap := m.width - 2 - lipgloss.Width(mode) - lipgloss.Width(button); gap > 0 {
+		mode += strings.Repeat(" ", gap) + button
+	}
+	return strings.Join([]string{divider, mode, m.styles.input.Width(max(1, m.width-2)).Render(m.composerView())}, "\n")
+}
+
+func (m Model) composerView() string {
+	view := m.input.View()
+	rows := composerRows(m.input)
+	if rows <= m.input.Height() {
+		return view
+	}
+	lines := strings.Split(view, "\n")
+	height := min(m.input.Height(), len(lines))
+	thumbHeight := max(1, height*height/rows)
+	thumbStart := 0
+	if maxOffset := rows - height; maxOffset > 0 {
+		thumbStart = (height - thumbHeight) * m.inputOffset / maxOffset
+	}
+	for row := range height {
+		marker := m.styles.muted.Render("│")
+		if row >= thumbStart && row < thumbStart+thumbHeight {
+			marker = m.styles.accent.Render("┃")
+		}
+		lines[row] += marker
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) sendButtonView() string {
+	if strings.TrimSpace(m.input.Value()) == "" {
+		return m.styles.muted.Render("[ send — ]")
+	}
+	return m.styles.accent.Render("[ send ↵ ]")
 }
 
 func (m Model) approvalModeView() string {
@@ -176,18 +210,29 @@ func (m Model) footerView() string {
 func highlightSelection(view string, selection *textSelection, style lipgloss.Style) string {
 	startX, startY, endX, endY := orderedSelection(selection)
 	lines := strings.Split(view, "\n")
+	startClipped, endClipped := false, false
+	if selection.input {
+		startClipped = startY < selection.inputTop
+		endClipped = endY > selection.inputBottom
+		startY = max(startY, selection.inputTop)
+		endY = min(endY, selection.inputBottom)
+	}
 	startY = max(0, startY)
 	endY = min(endY, len(lines)-1)
 	for row := startY; row <= endY; row++ {
 		width := lipgloss.Width(lines[row])
-		contentWidth := lipgloss.Width(strings.TrimRight(ansi.Strip(lines[row]), " "))
+		content := strings.TrimRight(ansi.Strip(lines[row]), " ")
+		contentWidth := lipgloss.Width(content)
+		if selection.input && (strings.HasSuffix(content, "│") || strings.HasSuffix(content, "┃")) {
+			contentWidth--
+		}
 		left, right := 0, contentWidth
-		if row == startY {
+		if row == startY && !startClipped {
 			left = min(max(0, startX), width)
 		} else if selection.input {
 			left = min(selection.inputLeft, width)
 		}
-		if row == endY {
+		if row == endY && !endClipped {
 			right = min(max(0, endX), width)
 		}
 		if right <= left {
@@ -252,9 +297,9 @@ func (m Model) helpView() string {
 		m.styles.title.Render("SHORTCUTS"),
 		"",
 		"Enter  send task or command",
-		"Alt+Enter  add a line",
+		"Alt+Enter / Ctrl+J  add a line",
 		"/  open commands",
-		"↑↓  browse chat when prompt is empty",
+		"↑↓  browse request history",
 		"PgUp/PgDn  page through chat · End latest",
 		"Ctrl+P  execution",
 		"Ctrl+T  show or hide thoughts",

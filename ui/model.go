@@ -81,6 +81,8 @@ type textSelection struct {
 	endX, endY     int
 	anchor, head   int
 	inputLeft      int
+	inputTop       int
+	inputBottom    int
 	input          bool
 	dragging       bool
 	copied         bool
@@ -106,10 +108,12 @@ type keyMap struct {
 	focusInput      key.Binding
 }
 
+const maxComposerHeight = 4
+
 func newKeyMap() keyMap {
 	return keyMap{
 		submit:          key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "send")),
-		newline:         key.NewBinding(key.WithKeys("alt+enter"), key.WithHelp("alt+enter", "newline")),
+		newline:         key.NewBinding(key.WithKeys("alt+enter", "ctrl+j"), key.WithHelp("alt+enter", "newline")),
 		complete:        key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "complete command")),
 		togglePanel:     key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "plan panel")),
 		toggleDebug:     key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "debug")),
@@ -198,7 +202,7 @@ func New(application *app.App, session *agent.Session, ctx context.Context, shut
 	input.SetWidth(78)
 	input.SetHeight(1)
 	input.MaxHeight = 0
-	input.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("alt+enter"), key.WithHelp("alt+enter", "newline"))
+	input.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("alt+enter", "ctrl+j"), key.WithHelp("alt+enter", "newline"))
 	input.FocusedStyle.Base = styles.composerBase
 	input.FocusedStyle.Prompt = styles.accent
 	input.FocusedStyle.Text = styles.text
@@ -283,8 +287,8 @@ func (m *Model) refreshProvider() {
 func (m *Model) layout() {
 	m.width = max(1, m.width)
 	m.height = max(1, m.height)
-	m.input.SetWidth(max(1, m.width-3))
-	m.input.SetHeight(min(4, composerRows(m.input)))
+	m.input.SetWidth(max(1, m.width-4))
+	m.input.SetHeight(min(maxComposerHeight, composerRows(m.input)))
 	m.realignComposer()
 	paletteHeight := 0
 	if m.paletteOpen {
@@ -310,7 +314,7 @@ func (m *Model) resetComposer() {
 
 func (m *Model) resizeComposer() {
 	rows, cursorRow := composerMetrics(m.input)
-	if height := min(4, rows); height != m.input.Height() {
+	if height := min(maxComposerHeight, rows); height != m.input.Height() {
 		m.layout()
 		return
 	}
