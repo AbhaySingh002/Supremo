@@ -1,45 +1,47 @@
 package web_search
 
 import (
+	"bytes"
 	"context"
 	"fmt"
-	"html"
 	"io"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strings"
 	"time"
+
+	readability "codeberg.org/readeck/go-readability/v2"
+	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown/v2"
 
 	"github.com/AbhaySingh002/supremo/internal/tools"
 )
 
-const webFetchTimeout = 30 * time.Second
-
-var (
-	nonTextHTML = regexp.MustCompile(`(?is)<(?:script|style)[^>]*>.*?</(?:script|style)\s*>`)
-	htmlTags    = regexp.MustCompile(`(?s)<[^>]*>`)
+const (
+	defaultWebFetchTimeout = 12 * time.Second
+	maxWebFetchBytes       = 5 << 20
+	webFetchUserAgent      = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
 )
 
 type WebFetchInput struct {
-	URL string `json:"url"`
+	URL            string `json:"url"`
+	TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
 }
 
 type WebFetchOutput struct {
 	URL         string `json:"url"`
+	Title       string `json:"title,omitempty"`
 	StatusCode  int    `json:"status_code"`
 	ContentType string `json:"content_type,omitempty"`
 	Content     string `json:"content"`
-	Truncated   bool   `json:"truncated,omitempty"`
 }
 
-// WebFetch retrieves an HTTP(S) page for the agent to inspect.
+// WebFetch retrieves an HTTP(S) page and returns its primary content as Markdown.
 type WebFetch struct{}
 
 func (t *WebFetch) Name() string { return "web_fetch" }
 
 func (t *WebFetch) Description() string {
-	return "Fetches an HTTP(S) page and returns up to 1 MiB of readable page text, status, and content type."
+	return "Fetches content from a specified URL, extracts the primary readable content, and converts it into clean Markdown suitable for LLM processing."
 }
 
 func (t *WebFetch) Schema() any {
@@ -48,7 +50,12 @@ func (t *WebFetch) Schema() any {
 		"properties": map[string]any{
 			"url": map[string]any{
 				"type":        "string",
-				"description": "HTTP or HTTPS URL to fetch",
+				"description": "The HTTP or HTTPS URL to fetch",
+			},
+			"timeout_seconds": map[string]any{
+				"type":        "integer",
+				"description": "Request timeout in seconds (default: 12)",
+				"default":     12,
 			},
 		},
 		"required": []string{"url"},
@@ -60,50 +67,68 @@ func (t *WebFetch) Execute(ctx context.Context, input any) (*tools.ToolResult, e
 	if err := tools.ParseInput(input, &parsed); err != nil {
 		return nil, err
 	}
-	urlValue, err := url.ParseRequestURI(parsed.URL)
-	if err != nil || urlValue.Host == "" || (urlValue.Scheme != "http" && urlValue.Scheme != "https") {
+	target, err := url.ParseRequestURI(strings.TrimSpace(parsed.URL))
+	if err != nil || target.Host == "" || (target.Scheme != "http" && target.Scheme != "https") {
 		return tools.BuildToolResult(false, "URL must be a valid HTTP(S) URL", nil), nil
 	}
-
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, urlValue.String(), nil)
-	if err != nil {
-		return nil, err
+	if parsed.TimeoutSeconds < 0 || int64(parsed.TimeoutSeconds) > (1<<63-1)/int64(time.Second) {
+		return tools.BuildToolResult(false, "timeout_seconds must be a positive integer", nil), nil
 	}
-	response, err := (&http.Client{Timeout: webFetchTimeout}).Do(request)
+	timeout := defaultWebFetchTimeout
+	if parsed.TimeoutSeconds > 0 {
+		timeout = time.Duration(parsed.TimeoutSeconds) * time.Second
+	}
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
-		return nil, fmt.Errorf("fetch page: %w", err)
+		return nil, fmt.Errorf("create web request: %w", err)
+	}
+	request.Header.Set("User-Agent", webFetchUserAgent)
+	response, err := (&http.Client{Timeout: timeout}).Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("fetch %s: %w", target.Redacted(), err)
 	}
 	defer response.Body.Close()
-	content, err := io.ReadAll(io.LimitReader(response.Body, tools.MaxFileBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("read page: %w", err)
-	}
-	truncated := int64(len(content)) > tools.MaxFileBytes
-	if truncated {
-		content = content[:tools.MaxFileBytes]
-	}
-	contentType := response.Header.Get("Content-Type")
-	pageContent := string(content)
-	if strings.HasPrefix(strings.ToLower(contentType), "text/html") {
-		pageContent = htmlText(pageContent)
-	}
-	output := WebFetchOutput{
-		URL:         response.Request.URL.String(),
-		StatusCode:  response.StatusCode,
-		ContentType: contentType,
-		Content:     pageContent,
-		Truncated:   truncated,
-	}
-	data, err := tools.SerializeOutput(output)
-	if err != nil {
-		return nil, err
-	}
-	return tools.BuildToolResult(response.StatusCode >= http.StatusOK && response.StatusCode < http.StatusMultipleChoices, response.Status, data), nil
-}
 
-func htmlText(content string) string {
-	// ponytail: regex cleanup handles ordinary pages; use an HTML tokenizer if malformed markup needs exact recovery.
-	content = nonTextHTML.ReplaceAllString(content, " ")
-	content = htmlTags.ReplaceAllString(content, " ")
-	return strings.Join(strings.Fields(html.UnescapeString(content)), " ")
+	if response.StatusCode != http.StatusOK {
+		return tools.BuildToolResult(false, "Fetch failed: expected 200 OK, got "+response.Status, nil), nil
+	}
+	if response.ContentLength > maxWebFetchBytes {
+		return tools.BuildToolResult(false, "Response exceeds 5 MiB download limit", nil), nil
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxWebFetchBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read response body: %w", err)
+	}
+	if len(body) > maxWebFetchBytes {
+		return tools.BuildToolResult(false, "Response exceeds 5 MiB download limit", nil), nil
+	}
+
+	article, err := readability.FromReader(bytes.NewReader(body), response.Request.URL)
+	if err != nil {
+		return nil, fmt.Errorf("extract readable content: %w", err)
+	}
+	if article.Node == nil {
+		return tools.BuildToolResult(false, "No readable content found", nil), nil
+	}
+	markdown, err := htmltomarkdown.ConvertNode(article.Node)
+	if err != nil {
+		return nil, fmt.Errorf("convert readable content to Markdown: %w", err)
+	}
+	content := strings.TrimSpace(string(markdown))
+	if content == "" {
+		return tools.BuildToolResult(false, "No readable content found", nil), nil
+	}
+
+	data, err := tools.SerializeOutput(WebFetchOutput{
+		URL:         response.Request.URL.String(),
+		Title:       article.Title(),
+		StatusCode:  response.StatusCode,
+		ContentType: response.Header.Get("Content-Type"),
+		Content:     content,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("serialize web_fetch output: %w", err)
+	}
+	return tools.BuildToolResult(true, "Web content fetched successfully", data), nil
 }
