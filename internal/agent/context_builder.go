@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	maxPromptTokenBudget = 20_000
+	maxPromptTokenBudget = 131_072
 	minPromptTokenBudget = 1_024
 )
 
