@@ -41,4 +41,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ github.ref_name }}
-        run: gh release create "$VERSION" dist/* --generate-notes
+        run: |
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release delete "$VERSION" --yes || true
+          fi
+          gh release create "$VERSION" dist/* --generate-notes
