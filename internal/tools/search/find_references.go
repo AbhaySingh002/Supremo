@@ -3,11 +3,10 @@ package search
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 
+	"github.com/AbhaySingh002/supremo/internal/repository"
 	"github.com/AbhaySingh002/supremo/internal/tools"
 )
 
@@ -46,8 +45,10 @@ func (t *FindReferences) Name() string {
 	return "find_references"
 }
 
+func (t *FindReferences) Capabilities() tools.CapabilitySet { return tools.CapabilityReadWorkspace }
+
 func (t *FindReferences) Description() string {
-	return "Searches for references to a symbol in the codebase. Returns file path, line number, column, and context for each reference."
+	return "Finds symbol usages (file + line). Follow with read_file around that line. Use find_symbol for the definition."
 }
 
 func (t *FindReferences) Schema() any {
@@ -96,6 +97,19 @@ func (t *FindReferences) Execute(ctx context.Context, input any) (*tools.ToolRes
 	if _, err := tools.PathExists(absPath); err != nil {
 		return tools.BuildToolResult(false, "Directory does not exist", nil), nil
 	}
+	if result, index, indexed, err := indexedQuery(ctx, repository.Query{Text: parsed.Symbol, Kind: "symbol", Exact: true, Limit: tools.MaxSearchResults}); indexed {
+		if err != nil {
+			return &tools.ToolResult{Success: false, Message: "Indexed search failed: " + err.Error()}, nil
+		}
+		references := make([]ReferenceMatch, 0, len(result.Candidates))
+		for _, candidate := range result.Candidates {
+			if candidate.Type != "symbol" || candidate.GraphDistance != 1 || !candidateInDirectory(index, candidate, absPath) || parsed.Language != "" && parsed.Language != "go" {
+				continue
+			}
+			references = append(references, ReferenceMatch{File: indexedPath(index, candidate), Line: candidate.StartLine, Column: candidate.StartColumn, Context: candidate.Signature})
+		}
+		return tools.BuildSerializedToolResult(true, "Reference search completed", FindReferencesOutput{References: references, Truncated: len(references) >= tools.MaxSearchResults}), nil
+	}
 
 	// Build regex pattern for symbol references
 	// This is a simplified pattern - real reference finding needs language-aware parsing
@@ -107,48 +121,7 @@ func (t *FindReferences) Execute(ctx context.Context, input any) (*tools.ToolRes
 	// Search for references
 	references := []ReferenceMatch{}
 	truncated := false
-	err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err != nil {
-			return nil
-		}
-
-		if info.IsDir() {
-			if tools.IsHidden(info.Name()) && path != absPath {
-				return filepath.SkipDir
-			}
-			depth, err := tools.SearchDepth(absPath, path)
-			if err != nil {
-				return err
-			}
-			if depth > tools.MaxSearchDepth {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if tools.ShouldSkipFile(path) {
-			return nil
-		}
-		depth, err := tools.SearchDepth(absPath, path)
-		if err != nil || depth > tools.MaxSearchDepth {
-			return err
-		}
-
-		// Filter by language extension
-		if !matchesLanguage(path, parsed.Language) {
-			return nil
-		}
-
-		// Read file content
-		content, err := tools.ReadSearchFile(path)
-		if err != nil {
-			return nil
-		}
-
-		// Search for symbol references
-		lines := strings.Split(string(content), "\n")
+	err = walkSourceFiles(ctx, absPath, parsed.Language, func(path string, lines []string) error {
 		for lineNum, line := range lines {
 			matches := pattern.FindAllStringIndex(line, -1)
 			for _, match := range matches {
@@ -195,11 +168,5 @@ func (t *FindReferences) Execute(ctx context.Context, input any) (*tools.ToolRes
 		Truncated:  truncated,
 	}
 
-	// Convert output to map for ToolResult
-	dataMap, err := tools.SerializeOutput(output)
-	if err != nil {
-		return tools.BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
-	}
-
-	return tools.BuildToolResult(true, "Reference search completed", dataMap), nil
+	return tools.BuildSerializedToolResult(true, "Reference search completed", output), nil
 }

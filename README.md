@@ -1,30 +1,28 @@
 # Supremo
 
-Supremo is a local Go coding agent. It supports Gemini, OpenAI, Anthropic, OpenRouter, and OpenAI-compatible endpoints, keeps its working state in the current repository, and asks before tools modify files or run arbitrary commands.
+Supremo is a local Go coding agent with a terminal user interface (TUI), durable sessions, deterministic context construction, bounded parallel tools, and isolated subagents. It keeps workspace history in SQLite, streams durable events through one backend contract, and applies session-scoped approval rules before side effects.
 
-## Install
+## Install Supremo
 
-Download a checksum-verified release for macOS, Linux, or Windows from [GitHub Releases](https://github.com/AbhaySingh002/Supremo/releases), or install the latest Unix release:
+Download a checksum-verified build from [GitHub Releases](https://github.com/AbhaySingh002/Supremo/releases), or install the latest Unix release:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/AbhaySingh002/Supremo/main/scripts/install.sh | sh
 ```
 
-Windows PowerShell:
+On Windows, run:
 
 ```powershell
 irm https://raw.githubusercontent.com/AbhaySingh002/Supremo/main/scripts/install.ps1 | iex
 ```
 
-The installers verify the downloaded release checksum and install Supremo to `~/.local/bin`. PowerShell updates PATH immediately; Unix installers add it to your shell profile automatically (open a new terminal after a first installation).
-
-If you already have Go, use:
+If Go is installed, you can also run:
 
 ```sh
 go install github.com/AbhaySingh002/supremo/cmd/supremo@latest
 ```
 
-To build from source:
+Build the repository with:
 
 ```sh
 git clone https://github.com/AbhaySingh002/Supremo.git
@@ -33,54 +31,110 @@ make build
 ./supremo --version
 ```
 
-## Quick start
+## Start an interactive session
 
-Run Supremo inside the repository you want it to work on:
+Run Supremo inside the repository you want it to inspect or change:
 
-```text
+```sh
 supremo
-> /auth YOUR_GEMINI_API_KEY
-> /init
-> explain this codebase and run its tests
 ```
 
-`/init` writes a small repository snapshot to `.memory/MEMORY.md`. Add project rules to `SUPREMO.md` (or `AGENTS.md`); Supremo injects them into each task's context.
+Configure the provider, choose a model, and initialize workspace memory from the TUI:
 
-## Commands
+```text
+/provider
+/model
+/init
+explain this repository and run its focused tests
+```
 
-| Command | Purpose |
-| --- | --- |
-| `/help` | List commands. |
-| `/init` | Create workspace memory. |
-| `/doctor` | Check local setup without making a provider request. |
-| `/tools` | Show tools and which require approval. |
-| `/activity` | Show recent local tool executions. |
-| `/plan` | Toggle planned, checkpointed tool execution. |
-| `/plan status`, `/plan show`, `/plan resume` | Inspect or resume the active plan. |
-| `/approve`, `/deny`, `/dry-run`, `/cancel` | Control a running task. |
-| `/auth`, `/provider`, `/endpoint`, `/model`, `/models`, `/usage`, `/config` | Configure and inspect the active provider. |
-| `/clear`, `/reset`, `/krypton` | Clear conversation, state, or workspace traces. |
+`/provider` opens a masked credential flow when the selected provider is not configured. `/model` refreshes and searches text-generation models across configured providers. The TUI keeps chat, tool activity, approvals, plan questions, and subagents on the same durable session stream.
 
-`run_build` and `run_tests` execute repository code automatically. File-changing tools, formatters, and `execute_command` require approval. `execute_command` is an approved escape hatch and is not sandboxed.
+## Run without the TUI
 
-## Local state and privacy
+Use one-shot mode for scripts and continuous integration (CI):
 
-- Credentials, provider configuration, and cached provider metadata stay in `~/.supremo/`.
-- Workspace memory, plans, checkpoints, and large tool-output scratch files stay in `.memory/`, `.session/`, and `.scratchpad/` in the current repository.
-- `/krypton` removes only those workspace files; it keeps `~/.supremo/`.
-- Prompts, selected workspace memory, tool observations, and configured web fetches are sent to the configured model provider when a task runs. Supremo has no built-in telemetry.
+```sh
+supremo --prompt "summarize this repository"
+echo "run the focused tests" | supremo
+supremo --resume session_id --prompt "continue the task"
+```
 
-Use `/provider openai`, `/provider anthropic`, or `/provider openrouter`, then `/auth <key>` and `/models` to choose a model. Add a future OpenAI-compatible server at runtime with a named route such as `/provider openai-compatible:ollama http://localhost:11434/v1`; its endpoint, model, key, and cache stay separate from other routes. Model and account metadata is cached locally and only refreshed by `/models refresh` or `/usage refresh`.
+One-shot runs are dry-run by default. Add `--approve` to allow mutating tools. Add `--plan` to research and save a plan without executing it.
 
-OpenRouter management keys can report account credits. OpenAI's costs API requires an organization admin key and reports spend, not remaining balance; Anthropic does not expose a normal key-level balance endpoint. Supremo always reports the token usage it receives from each completion, and reports a provider balance only when the key is allowed to retrieve one.
+Process-only provider settings use these flags:
 
-See [the privacy and state guide](docs/privacy.md) for details.
+```sh
+supremo --provider openai --model model_id --api-key your_api_key_here --prompt "inspect this project"
+supremo --provider openai-compatible --endpoint http://localhost:11434/v1 --model model_id --prompt "inspect this project"
+```
 
-## Development
+Flags override `SUPREMO_PROVIDER`, `SUPREMO_MODEL`, `SUPREMO_ENDPOINT`, and `SUPREMO_API_KEY`. Environment variables override saved configuration.
+
+Start the loopback application programming interface (API) server with:
+
+```sh
+supremo serve --listen 127.0.0.1:0
+```
+
+The server prints its URL and bearer token as JSON. See [COMMANDS.md](COMMANDS.md) for the complete CLI, slash-command, and keyboard reference.
+
+## Control tool safety
+
+Approval mode belongs to the active session:
+
+- `strict` asks before tools marked as approval-required
+- `batman` is the default; it runs routine work and asks before higher-risk actions
+- `superman` auto-approves tool actions
+- `dry-run` reports mutating actions without applying them
+- Plan Mode permits research and planning, not workspace mutation
+
+`execute_command` is not sandboxed. It is the command path for builds, tests, formatters, and repository scripts. Filesystem tools use path locks, read-before-write hashes, atomic writes, and optional rewind checkpoints. A stale write fails when another agent changes the observed file first.
+
+## Understand the runtime
+
+```text
+TUI -> api.Client -> backend.Service ---------┐
+HTTP/SSE -> transport/http -> backend.Service ┤
+one-shot CLI -> app.AgentAPI -----------------┤
+                                             v
+                                      RuntimeManager
+                           session Agent A | session Agent B | child Agent
+                                             |
+                         context compiler | providers | tool scheduler
+                                             |
+                                SQLite state + artifact objects
+```
+
+The backend admits runs, enforces idempotency, serves snapshots, and streams ordered events. Each live session receives an isolated agent runtime. A request compiler rebuilds and measures the exact provider-visible envelope before every model call. Safe read operations may overlap, but tool results commit in model order. Delegated agents run as durable child sessions with bounded authority.
+
+Read [PROJECT.md](PROJECT.md) for package ownership, request flow, recovery behavior, and architecture scenarios.
+
+## Locate local data
+
+Supremo stores configuration under the operating system's user configuration directory in `supremo/`. Set `SUPREMO_DATA_DIR` to choose another location. The directory contains:
+
+- `global.db`: workspace identity registry
+- `config.yaml` and `credentials.json`: provider settings and credentials
+- `workspaces/workspace_id/state.db`: sessions, messages, events, plans, interactions, and repository index
+- `workspaces/workspace_id/objects/`: content-addressed prompt and tool artifacts
+- `workspaces/workspace_id/checkpoints/`: rewind data
+
+Supremo migrates legacy workspace-local `.supremo/` state when it first opens that workspace. It sends prompts, selected workspace evidence, tool observations, and configured web requests to the chosen provider. It has no built-in telemetry. Semantic repository indexing is opt-in because it sends selected source chunks to the configured embedding endpoint.
+
+## Contribute changes
+
+Read these documents before editing:
+
+- [AGENTS.md](AGENTS.md): binding instructions for AI coding agents
+- [PROJECT.md](PROJECT.md): architecture, ownership, and runtime scenarios
+- [COMMANDS.md](COMMANDS.md): user commands and keyboard actions
+- [DEVELOPMENT.md](DEVELOPMENT.md): debug builds, logging, release process, and full validation
+
+Run the repository checks with:
 
 ```sh
 make precommit
-git config core.hooksPath .githooks
 ```
 
-CI runs race tests, vet, builds, and cross-compilation on every push and pull request. Pushing a `v*` tag creates release archives and checksums.
+Continuous integration runs race tests, vet, release builds, and cross-compilation. A `v*` tag creates release archives and checksums.

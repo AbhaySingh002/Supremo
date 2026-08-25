@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -37,18 +38,28 @@ func (p *AnthropicProvider) headers() http.Header {
 func (p *AnthropicProvider) Chat(ctx context.Context, prompt *models.Prompt) (*Completion, error) {
 	type message struct {
 		Role    string `json:"role"`
-		Content string `json:"content"`
+		Content any    `json:"content"`
+	}
+	type toolDefinition struct {
+		Name        string         `json:"name"`
+		Description string         `json:"description,omitempty"`
+		InputSchema map[string]any `json:"input_schema"`
 	}
 	type request struct {
-		Model     string    `json:"model"`
-		MaxTokens int       `json:"max_tokens"`
-		System    string    `json:"system,omitempty"`
-		Messages  []message `json:"messages"`
+		Model        string           `json:"model"`
+		MaxTokens    int              `json:"max_tokens"`
+		System       string           `json:"system,omitempty"`
+		Messages     []message        `json:"messages"`
+		Tools        []toolDefinition `json:"tools,omitempty"`
+		OutputConfig any              `json:"output_config,omitempty"`
 	}
 	type response struct {
 		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
+			Type  string          `json:"type"`
+			Text  string          `json:"text"`
+			ID    string          `json:"id"`
+			Name  string          `json:"name"`
+			Input json.RawMessage `json:"input"`
 		} `json:"content"`
 		StopReason string `json:"stop_reason"`
 		Usage      struct {
@@ -56,28 +67,72 @@ func (p *AnthropicProvider) Chat(ctx context.Context, prompt *models.Prompt) (*C
 			OutputTokens int `json:"output_tokens"`
 		} `json:"usage"`
 	}
-	messages := make([]message, 0, len(prompt.Messages))
-	for _, msg := range prompt.Messages {
+	history := providerMessages(prompt)
+	messages := make([]message, 0, len(history))
+	for _, msg := range history {
 		role := "user"
 		if msg.Role == models.RoleAssistant {
 			role = "assistant"
 		}
-		messages = append(messages, message{Role: role, Content: msg.Content})
+		content := any(msg.Content)
+		if len(msg.ToolCalls) > 0 {
+			blocks := make([]map[string]any, 0, len(msg.ToolCalls)+1)
+			if msg.Content != "" {
+				blocks = append(blocks, map[string]any{"type": "text", "text": msg.Content})
+			}
+			for _, call := range msg.ToolCalls {
+				blocks = append(blocks, map[string]any{"type": "tool_use", "id": call.ID, "name": call.Name, "input": call.Arguments})
+			}
+			content = blocks
+		}
+		if msg.Role == models.RoleTool {
+			role = "user"
+			content = []map[string]any{{"type": "tool_result", "tool_use_id": msg.ToolCallID, "content": msg.Content}}
+		}
+		messages = append(messages, message{Role: role, Content: content})
+	}
+	maxTokens := 8192
+	if prompt.OutputReserve > 0 {
+		maxTokens = max(prompt.OutputReserve, 8192)
 	}
 	var responseBody response
-	if err := doJSON(ctx, p.client, http.MethodPost, apiURL(p.endpoint, "messages"), "", p.headers(), request{Model: p.model, MaxTokens: 4096, System: prompt.System, Messages: messages}, &responseBody); err != nil {
+	req := request{Model: p.model, MaxTokens: maxTokens, System: prompt.System, Messages: messages}
+	for _, definition := range prompt.ToolDefinitions {
+		var schema map[string]any
+		if json.Unmarshal(definition.InputSchema, &schema) == nil {
+			req.Tools = append(req.Tools, toolDefinition{Name: definition.Name, Description: definition.Description, InputSchema: schema})
+		}
+	}
+	err := doJSON(ctx, p.client, http.MethodPost, apiURL(p.endpoint, "messages"), "", p.headers(), req, &responseBody)
+	if err != nil {
 		return nil, fmt.Errorf("anthropic execution: %w", err)
 	}
+	finish := NormalizeFinishReason(responseBody.StopReason)
+	completion := &Completion{FinishReason: string(finish), Usage: Usage{InputTokens: responseBody.Usage.InputTokens, OutputTokens: responseBody.Usage.OutputTokens}}
 	var text strings.Builder
 	for _, block := range responseBody.Content {
 		if block.Type == "text" && block.Text != "" {
 			text.WriteString(block.Text)
+		} else if block.Type == "tool_use" {
+			rawInput := block.Input
+			if len(rawInput) == 0 {
+				rawInput = json.RawMessage(`{}`)
+			}
+			id, synthetic := normalizeToolCallID(block.ID)
+			completion.ToolCalls = append(completion.ToolCalls, models.ToolCall{ID: id, Name: canonicalToolName(block.Name, prompt.ActiveTools), Arguments: rawInput, Synthetic: synthetic})
 		}
 	}
-	if text.Len() == 0 {
-		return nil, fmt.Errorf("anthropic returned no text content")
+	completion.Text = text.String()
+	if len(completion.ToolCalls) > 0 {
+		if completion.FinishReason == "" || completion.FinishReason == string(FinishStop) {
+			completion.FinishReason = string(FinishToolCalls)
+		}
+		return completion, nil
 	}
-	return &Completion{Raw: text.String(), FinishReason: responseBody.StopReason, Usage: Usage{InputTokens: responseBody.Usage.InputTokens, OutputTokens: responseBody.Usage.OutputTokens}}, nil
+	if completion.Text == "" && len(completion.ToolCalls) == 0 {
+		return nil, &ProviderFailure{Code: FailureEmptyResponse, Message: "anthropic returned no text or tool content"}
+	}
+	return completion, nil
 }
 
 func (p *AnthropicProvider) FetchMetadata(ctx context.Context) (Metadata, error) {

@@ -3,7 +3,9 @@ package terminal
 import (
 	"context"
 	"os/exec"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/AbhaySingh002/supremo/internal/tools"
@@ -18,10 +20,11 @@ import (
 // It is intentionally not a sandbox; the manager requires explicit approval.
 
 type ExecuteCommandInput struct {
-	Command   string   `json:"command"`
-	Args      []string `json:"args"`
-	Directory string   `json:"directory"`
-	Timeout   int      `json:"timeout"` // timeout in seconds
+	Command     string            `json:"command"`
+	Args        []string          `json:"args"`
+	Directory   string            `json:"directory"`
+	Timeout     int               `json:"timeout"` // timeout in seconds
+	Environment map[string]string `json:"environment,omitempty"`
 }
 
 type ExecuteCommandOutput struct {
@@ -37,6 +40,8 @@ type ExecuteCommand struct{}
 func (t *ExecuteCommand) Name() string {
 	return "execute_command"
 }
+
+func (t *ExecuteCommand) Capabilities() tools.CapabilitySet { return tools.CapabilityExecuteProcess }
 
 func (t *ExecuteCommand) Description() string {
 	return "Approved escape hatch for arbitrary commands; it is not sandboxed. Returns bounded stdout and stderr."
@@ -62,6 +67,11 @@ func (t *ExecuteCommand) Schema() any {
 			"timeout": map[string]any{
 				"type":        "integer",
 				"description": "Timeout in seconds (default: 30)",
+			},
+			"environment": map[string]any{
+				"type":                 "object",
+				"additionalProperties": map[string]any{"type": "string"},
+				"description":          "Environment variables to add or override for this command",
 			},
 		},
 		"required": []string{"command"},
@@ -103,6 +113,20 @@ func (t *ExecuteCommand) Execute(ctx context.Context, input any) (*tools.ToolRes
 		}
 		cmd.Dir = directory
 	}
+	if len(parsed.Environment) > 0 {
+		keys := make([]string, 0, len(parsed.Environment))
+		for key, value := range parsed.Environment {
+			if key == "" || strings.ContainsAny(key, "=\x00") || strings.ContainsRune(value, '\x00') {
+				return tools.BuildToolResult(false, "Environment contains an invalid name or value", nil), nil
+			}
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		cmd.Env = cmd.Environ()
+		for _, key := range keys {
+			cmd.Env = append(cmd.Env, key+"="+parsed.Environment[key])
+		}
+	}
 
 	// Execute command and capture output
 	cmdOutput, err := ExecuteCommandWithOutput(cmdCtx, cmd)
@@ -111,21 +135,7 @@ func (t *ExecuteCommand) Execute(ctx context.Context, input any) (*tools.ToolRes
 	}
 
 	exitCode := cmdOutput.ExitCode
-	// Build output
-	output := ExecuteCommandOutput{
-		ExitCode:        exitCode,
-		Stdout:          string(cmdOutput.Stdout),
-		Stderr:          string(cmdOutput.Stderr),
-		StdoutTruncated: cmdOutput.StdoutTruncated,
-		StderrTruncated: cmdOutput.StderrTruncated,
-	}
-
-	// Convert output to map for ToolResult
-	dataMap, err := tools.SerializeOutput(output)
-	if err != nil {
-		return tools.BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
-	}
-
+	output := diagnoseCommand(parsed.Command, parsed.Args, cmdOutput)
 	success := exitCode == 0
 	message := "Command executed"
 	if cmdOutput.TimedOut {
@@ -136,5 +146,5 @@ func (t *ExecuteCommand) Execute(ctx context.Context, input any) (*tools.ToolRes
 		message = "Command failed with exit code " + strconv.Itoa(exitCode)
 	}
 
-	return tools.BuildToolResult(success, message, dataMap), nil
+	return tools.BuildSerializedToolResult(success, message, output), nil
 }

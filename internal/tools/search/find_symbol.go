@@ -3,11 +3,11 @@ package search
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
+	"github.com/AbhaySingh002/supremo/internal/repository"
 	"github.com/AbhaySingh002/supremo/internal/tools"
 )
 
@@ -46,8 +46,10 @@ func (t *FindSymbol) Name() string {
 	return "find_symbol"
 }
 
+func (t *FindSymbol) Capabilities() tools.CapabilitySet { return tools.CapabilityReadWorkspace }
+
 func (t *FindSymbol) Description() string {
-	return "Searches for symbol definitions in the codebase. Returns file path, line number, symbol name, and type."
+	return "Finds symbol definitions (file + line). Follow with read_file around that line. Use find_references for usages and search_text for arbitrary substrings."
 }
 
 func (t *FindSymbol) Schema() any {
@@ -96,6 +98,19 @@ func (t *FindSymbol) Execute(ctx context.Context, input any) (*tools.ToolResult,
 	if _, err := tools.PathExists(absPath); err != nil {
 		return tools.BuildToolResult(false, "Directory does not exist", nil), nil
 	}
+	if result, index, indexed, err := indexedQuery(ctx, repository.Query{Text: parsed.Symbol, Kind: "symbol", Exact: true, Limit: tools.MaxSearchResults}); indexed {
+		if err != nil {
+			return &tools.ToolResult{Success: false, Message: "Indexed search failed: " + err.Error()}, nil
+		}
+		matches := make([]SymbolMatch, 0, len(result.Candidates))
+		for _, candidate := range result.Candidates {
+			if candidate.Type != "symbol" || !candidateInDirectory(index, candidate, absPath) || parsed.Language != "" && parsed.Language != "go" {
+				continue
+			}
+			matches = append(matches, SymbolMatch{File: indexedPath(index, candidate), Line: candidate.StartLine, Symbol: candidate.Name, SymbolType: candidate.Kind})
+		}
+		return tools.BuildSerializedToolResult(true, "Symbol search completed", FindSymbolOutput{Matches: matches, Truncated: len(matches) >= tools.MaxSearchResults}), nil
+	}
 
 	// Get language-specific patterns
 	patterns := getSymbolPatterns(parsed.Language, parsed.Symbol)
@@ -103,48 +118,7 @@ func (t *FindSymbol) Execute(ctx context.Context, input any) (*tools.ToolResult,
 	// Search for matches
 	matches := []SymbolMatch{}
 	truncated := false
-	err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err != nil {
-			return nil
-		}
-
-		if info.IsDir() {
-			if tools.IsHidden(info.Name()) && path != absPath {
-				return filepath.SkipDir
-			}
-			depth, err := tools.SearchDepth(absPath, path)
-			if err != nil {
-				return err
-			}
-			if depth > tools.MaxSearchDepth {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if tools.ShouldSkipFile(path) {
-			return nil
-		}
-		depth, err := tools.SearchDepth(absPath, path)
-		if err != nil || depth > tools.MaxSearchDepth {
-			return err
-		}
-
-		// Filter by language extension
-		if !matchesLanguage(path, parsed.Language) {
-			return nil
-		}
-
-		// Read file content
-		content, err := tools.ReadSearchFile(path)
-		if err != nil {
-			return nil
-		}
-
-		// Search for symbol definitions
-		lines := strings.Split(string(content), "\n")
+	err = walkSourceFiles(ctx, absPath, parsed.Language, func(path string, lines []string) error {
 		for lineNum, line := range lines {
 			for _, pattern := range patterns {
 				if pattern.regex.MatchString(line) {
@@ -182,13 +156,7 @@ func (t *FindSymbol) Execute(ctx context.Context, input any) (*tools.ToolResult,
 		Truncated: truncated,
 	}
 
-	// Convert output to map for ToolResult
-	dataMap, err := tools.SerializeOutput(output)
-	if err != nil {
-		return tools.BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
-	}
-
-	return tools.BuildToolResult(true, "Symbol search completed", dataMap), nil
+	return tools.BuildSerializedToolResult(true, "Symbol search completed", output), nil
 }
 
 type symbolPattern struct {

@@ -1,13 +1,11 @@
 package prompts
 
-import _ "embed"
+import (
+	_ "embed"
+)
 
-//go:embed templates/plan_mode.md
-var planMode string
+//go:embed templates/swe.md
+var sweProfile string
 
-//go:embed templates/audit.md
-var audit string
-
-func PlanMode() string { return planMode }
-
-func Audit() string { return audit }
+//go:embed templates/side_answer.md
+var sideAnswer string

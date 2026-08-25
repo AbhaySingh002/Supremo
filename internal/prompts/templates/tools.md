@@ -1,68 +1,8 @@
-# Tool Execution Policy
+# Tool Use
 
-## Source of Truth
-* **Zero Fabrication**: Do not invent tool names, arguments, or execution results. All tool outputs must come directly from real tool executions.
-* **Observe & Adapt**: Never ignore tool output or error messages. If a tool fails or returns unexpected results, adjust your plan immediately.
-* **Verification Over Guesswork**: Use tools to verify file contents, paths, compilation status, or runtime behavior. Do not assume or guess what a command did.
-
-## Efficiency & Execution
-* **Minimal Tool Calls**: Use the most specific tool for the job. Avoid redundant calls, and do not call the same tool repeatedly with identical inputs.
-* **Logical Chaining**: Sequence tool calls cleanly (e.g. read file -> modify file -> build code -> test changes).
-* **Fail Fast**: If a critical tool execution fails, stop immediately. Analyze the error and correct the issue before executing subsequent tools.
-* **Execution Risk**: `run_build` and `run_tests` execute project code automatically. `execute_command` is an approval-gated escape hatch and is not sandboxed.
-
-## Response Grammar
-
-You MUST use the following XML tags for ALL tool invocations and final responses.
-
-### Invoking a Tool
-
-To execute a tool, emit a `<tool_call>` block containing a JSON object with the tool name and arguments:
-
-<tool_call>
-{
-    "tool": "read_file",
-    "arguments": {
-        "path": "README.md"
-    }
-}
-</tool_call>
-
-### Multiple Tools
-
-If a task requires multiple tools, emit multiple `<tool_call>` blocks:
-
-<tool_call>
-{
-    "tool": "create_directory",
-    "arguments": {
-        "path": "/absolute/path/to/test"
-    }
-}
-</tool_call>
-
-<tool_call>
-{
-    "tool": "write_file",
-    "arguments": {
-        "path": "/absolute/path/to/test/main.go",
-        "content": "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"hello\")\n}"
-    }
-}
-</tool_call>
-
-### Final Response
-
-After ALL required tool executions are complete, emit a `<final_answer>` block:
-
-<final_answer>
-Created the test directory and wrote main.go with a basic HTTP server.
-</final_answer>
-
-### Rules
-
-- ONLY use tools listed in the Available Tools section above.
-- ALWAYS use `<tool_call>` tags. NEVER use markdown fenced blocks for tool calls.
-- ALWAYS use absolute paths in tool arguments.
-- Do NOT wrap tool_call tags in markdown code blocks.
-- Do NOT add any formatting around the JSON inside tool_call tags.
+- Only tools listed for this request are callable. Never print fake tool syntax or describe an action instead of calling the available tool.
+- Use search to localize unknown code, targeted reads for known files, and `execute_command` for builds, tests, formatting, and other synchronous commands.
+- Treat tool results as evidence. On failure, use the reported path, command, cause, and retry guidance to recover.
+- Use `discover_tools` only to learn what is available. Use the native read/search tools for repository inspection.
+- Use `ask_user_question` only for genuine user-owned decisions that inspection cannot answer.
+- Use `todo_write` only for meaningful multi-step execution work: send the whole list, keep at most one item in progress, and mark completion only after the work is actually complete. Do not use TODOs as a Plan Mode document.

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/AbhaySingh002/supremo/internal/repository"
 	"github.com/AbhaySingh002/supremo/internal/tools"
 )
 
@@ -42,8 +43,10 @@ func (t *SearchFileName) Name() string {
 	return "search_file_name"
 }
 
+func (t *SearchFileName) Capabilities() tools.CapabilitySet { return tools.CapabilityReadWorkspace }
+
 func (t *SearchFileName) Description() string {
-	return "Searches for files by name pattern in a directory. Returns file path, name, and type for each match."
+	return "Finds files by name glob. Use this to localize a path, then search_text or read_file inside it."
 }
 
 func (t *SearchFileName) Schema() any {
@@ -95,6 +98,28 @@ func (t *SearchFileName) Execute(ctx context.Context, input any) (*tools.ToolRes
 	// Check if path exists
 	if _, err := tools.PathExists(absPath); err != nil {
 		return tools.BuildToolResult(false, "Path does not exist", nil), nil
+	}
+	if query := strings.Trim(parsed.Pattern, "*"); query != "" {
+		if result, index, indexed, err := indexedQuery(ctx, repository.Query{Text: query, Kind: "file", Exact: true, Limit: tools.MaxSearchResults}); indexed {
+			if err != nil {
+				return &tools.ToolResult{Success: false, Message: "Indexed search failed: " + err.Error()}, nil
+			}
+			matches := []FileNameMatch{}
+			for _, candidate := range result.Candidates {
+				if candidate.Type != "file" || !candidateInDirectory(index, candidate, absPath) {
+					continue
+				}
+				name := filepath.Base(candidate.Path)
+				value, pattern := name, parsed.Pattern
+				if !parsed.CaseSensitive {
+					value, pattern = strings.ToLower(value), strings.ToLower(pattern)
+				}
+				if matched, _ := filepath.Match(pattern, value); matched {
+					matches = append(matches, FileNameMatch{Path: indexedPath(index, candidate), Name: name, Type: "file"})
+				}
+			}
+			return tools.BuildSerializedToolResult(true, "Search completed", SearchFileNameOutput{Matches: matches, Truncated: len(matches) >= tools.MaxSearchResults}), nil
+		}
 	}
 
 	maxDepth := tools.SearchDepthLimit(parsed.MaxDepth)
@@ -185,11 +210,5 @@ func (t *SearchFileName) Execute(ctx context.Context, input any) (*tools.ToolRes
 		Truncated: truncated,
 	}
 
-	// Convert output to map for ToolResult
-	dataMap, err := tools.SerializeOutput(output)
-	if err != nil {
-		return tools.BuildToolResult(false, "Failed to serialize output: "+err.Error(), nil), nil
-	}
-
-	return tools.BuildToolResult(true, "Search completed", dataMap), nil
+	return tools.BuildSerializedToolResult(true, "Search completed", output), nil
 }
