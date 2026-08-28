@@ -27,6 +27,74 @@ function Fail([string]$Message) {
   throw $Message
 }
 
+function Download-Asset([string]$Url, [string]$OutPath, [string]$DisplayName) {
+  Step "Downloading $DisplayName..."
+  $downloaded = $false
+
+  try {
+    $client = [System.Net.Http.HttpClient]::new()
+    $client.Timeout = [System.TimeSpan]::FromSeconds(30)
+    $response = $client.GetAsync($Url, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+    if ($response.IsSuccessStatusCode) {
+      $totalBytes = $response.Content.Headers.ContentLength
+      $stream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+      $fs = [System.IO.File]::Create($OutPath)
+      $buffer = New-Object byte[] 32768
+      $received = 0
+      $lastDraw = [DateTime]::MinValue
+      $barWidth = 24
+
+      while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+        $fs.Write($buffer, 0, $read)
+        $received += $read
+        $now = [DateTime]::UtcNow
+        if (($now - $lastDraw).TotalMilliseconds -ge 60) {
+          $lastDraw = $now
+          if ($totalBytes -and $totalBytes -gt 0) {
+            $pct = [Math]::Min(100, [int](($received / $totalBytes) * 100))
+            $filled = [Math]::Min($barWidth, [int](($received / $totalBytes) * $barWidth))
+            $empty = $barWidth - $filled
+            $barFilled = "█" * $filled
+            $barEmpty = "░" * $empty
+            $curMB = ($received / 1MB).ToString("0.0")
+            $totMB = ($totalBytes / 1MB).ToString("0.0")
+            Write-Host -NoNewline "`r    "
+            Write-Host -NoNewline $barFilled -ForegroundColor Yellow
+            Write-Host -NoNewline $barEmpty -ForegroundColor DarkGray
+            Write-Host -NoNewline " $($pct.ToString().PadLeft(3))% " -ForegroundColor White
+            Write-Host -NoNewline "($curMB MB / $totMB MB)  " -ForegroundColor DarkGray
+          } else {
+            $curMB = ($received / 1MB).ToString("0.0")
+            Write-Host -NoNewline "`r    "
+            Write-Host -NoNewline "▰▰▰▱▱▱ " -ForegroundColor Yellow
+            Write-Host -NoNewline "$curMB MB downloaded...  " -ForegroundColor DarkGray
+          }
+        }
+      }
+      $fs.Flush()
+      $fs.Close()
+      $stream.Close()
+      $client.Dispose()
+      Write-Host "`r                                                                     `r" -NoNewline
+      $downloaded = $true
+    }
+  } catch {
+    # If custom streaming fails, fallback below
+  }
+
+  if (-not $downloaded) {
+    if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+      & curl.exe -# -fL --connect-timeout 15 $Url -o $OutPath
+      if ($LASTEXITCODE -ne 0) {
+        Fail "Download failed for $DisplayName"
+      }
+    } else {
+      Invoke-WebRequest $Url -OutFile $OutPath -UseBasicParsing -TimeoutSec 30
+    }
+  }
+  Success "Downloaded $DisplayName"
+}
+
 # Banner
 Write-Host ""
 Write-Host "  ░█▀▀░█░█░█▀█░█▀▄░█▀▀░█▄█░█▀█" -ForegroundColor Yellow
@@ -57,7 +125,8 @@ if ([string]::IsNullOrEmpty($arch)) {
 Info "Detected platform: windows / $arch"
 
 # 2. Version Resolution
-$version = (Invoke-RestMethod "https://raw.githubusercontent.com/$owner/$repo/main/VERSION").Trim()
+Info "Resolving latest version..."
+$version = (Invoke-RestMethod "https://raw.githubusercontent.com/$owner/$repo/main/VERSION" -TimeoutSec 10).Trim()
 if ([string]::IsNullOrWhiteSpace($version)) {
   Fail "Resolved version is empty."
 }
@@ -71,16 +140,13 @@ $archive = "$base/$asset"
 
 $temp = New-Item -ItemType Directory -Path (Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid()))
 try {
-  Info "Downloading $asset..."
+  Download-Asset -Url $archive -OutPath (Join-Path $temp $asset) -DisplayName $asset
+
+  Info "Fetching checksums..."
   if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
-    & curl.exe -fsSL $archive -o (Join-Path $temp $asset)
-    if ($LASTEXITCODE -ne 0) {
-      Fail "Download failed for $asset"
-    }
-    & curl.exe -fsSL $checksum -o (Join-Path $temp "checksums.txt")
+    & curl.exe -fsSL --connect-timeout 10 $checksum -o (Join-Path $temp "checksums.txt")
   } else {
-    Invoke-WebRequest $archive -OutFile (Join-Path $temp $asset) -UseBasicParsing
-    Invoke-WebRequest $checksum -OutFile (Join-Path $temp "checksums.txt") -UseBasicParsing
+    Invoke-WebRequest $checksum -OutFile (Join-Path $temp "checksums.txt") -UseBasicParsing -TimeoutSec 10
   }
 
   $expected = ((Get-Content (Join-Path $temp "checksums.txt") | Where-Object { $_ -match [regex]::Escape($asset) }) -split '\s+')[0]

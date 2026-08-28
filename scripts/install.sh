@@ -82,8 +82,9 @@ command -v curl >/dev/null 2>&1 || fail "curl is required to install supremo"
 info "Detected platform: $os / $arch"
 
 # 2. Version Resolution
+info "Resolving latest version..."
 VERSION_URL="https://raw.githubusercontent.com/$OWNER/$REPO/main/VERSION"
-VERSION=$(curl -fsSL "$VERSION_URL" | tr -d '\r\n') || fail "Failed to fetch VERSION from $VERSION_URL"
+VERSION=$(curl -fsSL --connect-timeout 10 "$VERSION_URL" | tr -d '\r\n') || fail "Failed to fetch VERSION from $VERSION_URL"
 [ -n "$VERSION" ] || fail "Resolved version is empty"
 
 info "Latest version: $VERSION"
@@ -98,12 +99,76 @@ TMP_DIR="${TMPDIR:-/tmp}/supremo.$$"
 trap 'rm -rf "$TMP_DIR"' 0
 trap 'exit 1' HUP INT TERM
 
-# 4. Download & Verify
-info "Downloading $ASSET..."
-curl -fsSL "$BASE_URL/$ASSET" -o "$TMP_DIR/$ASSET" || fail "Download failed for $ASSET"
+download_with_progress() {
+  url="$1"
+  dest="$2"
+  label="$3"
 
-info "Downloading checksums..."
-curl -fsSL "$BASE_URL/$CHECKSUMS" -o "$TMP_DIR/$CHECKSUMS" || fail "Download failed for $CHECKSUMS"
+  step "Downloading $label..."
+
+  # Get Content-Length if available
+  total_bytes=$(curl -sLI "$url" | awk -F': ' 'tolower($1)=="content-length"{val=$2} END{print val}' | tr -d '\r\n')
+  case "$total_bytes" in
+    ''|*[!0-9]*) total_bytes=0 ;;
+  esac
+
+  curl -fsSL --connect-timeout 15 "$url" -o "$dest" &
+  curl_pid=$!
+
+  bar_width=24
+
+  if [ -t 1 ]; then
+    while kill -0 "$curl_pid" 2>/dev/null; do
+      if [ -f "$dest" ]; then
+        cur_bytes=$(wc -c < "$dest" 2>/dev/null || printf 0)
+      else
+        cur_bytes=0
+      fi
+      cur_bytes=$(printf "%d" "$cur_bytes" 2>/dev/null || printf 0)
+
+      if [ "$total_bytes" -gt 0 ]; then
+        pct=$(( cur_bytes * 100 / total_bytes ))
+        [ "$pct" -gt 100 ] && pct=100
+        filled=$(( pct * bar_width / 100 ))
+        empty=$(( bar_width - filled ))
+
+        bar_f=""
+        i=0
+        while [ "$i" -lt "$filled" ]; do
+          bar_f="${bar_f}█"
+          i=$(( i + 1 ))
+        done
+        bar_e=""
+        i=0
+        while [ "$i" -lt "$empty" ]; do
+          bar_e="${bar_e}░"
+          i=$(( i + 1 ))
+        done
+
+        cur_mb=$(awk -v b="$cur_bytes" 'BEGIN {printf "%.1f", b/1048576}')
+        tot_mb=$(awk -v b="$total_bytes" 'BEGIN {printf "%.1f", b/1048576}')
+
+        printf "\r    %b%s%b%s %b%3d%%%b %b(%s MB / %s MB)%b  " \
+          "$ACCENT" "$bar_f" "$MUTED" "$bar_e" "$WHITE" "$pct" "$RESET" "$MUTED" "$cur_mb" "$tot_mb" "$RESET"
+      else
+        cur_mb=$(awk -v b="$cur_bytes" 'BEGIN {printf "%.1f", b/1048576}')
+        printf "\r    %b▰▰▰▱▱▱%b %b%s MB downloaded...%b  " \
+          "$ACCENT" "$RESET" "$MUTED" "$cur_mb" "$RESET"
+      fi
+      sleep 0.08
+    done
+    printf "\r%80s\r" ""
+  fi
+
+  wait "$curl_pid" || fail "Download failed for $label"
+  success "Downloaded $label"
+}
+
+# 4. Download & Verify
+download_with_progress "$BASE_URL/$ASSET" "$TMP_DIR/$ASSET" "$ASSET"
+
+info "Fetching checksums..."
+curl -fsSL --connect-timeout 10 "$BASE_URL/$CHECKSUMS" -o "$TMP_DIR/$CHECKSUMS" || fail "Download failed for $CHECKSUMS"
 
 checksum_line=$(awk -v asset="$ASSET" '$2 == asset { print; exit }' "$TMP_DIR/$CHECKSUMS")
 [ -n "$checksum_line" ] || fail "Checksum entry not found for $ASSET"
