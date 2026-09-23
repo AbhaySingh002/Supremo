@@ -146,6 +146,14 @@ func beginCheckpoint(ctx context.Context, desc ToolDescriptor, input any) (*chec
 	if Workspace(ctx) == "" {
 		return nil, classify(ErrorClassCheckpoint, errors.New("checkpoint preflight failed: missing workspace"))
 	}
+	if name == "execute_command" {
+		directory := inputValue(input, "directory")
+		if directory != "" {
+			if _, err := ValidateAndResolvePath(ctx, directory); err != nil {
+				return nil, classify(ErrorClassToolArgument, fmt.Errorf("working directory must be inside the workspace: %w", err))
+			}
+		}
+	}
 	checkpointMu.Lock()
 	handle := newCheckpointHandle(ctx, Workspace(ctx), config.sessionID, checkpointAction(name, input), checkpointScopes(ctx, name, input))
 	handle.unlock = true
@@ -541,7 +549,7 @@ func (h *checkpointHandle) failPreflight(path string, err error) {
 
 func checkpointScopes(ctx context.Context, name string, input any) []snapshotScope {
 	switch name {
-	case "create_directory", "delete_file", "write_file", "replace_in_file":
+	case "delete_file", "write_file", "replace_in_file":
 		return []snapshotScope{{path: inputValue(input, "path")}}
 	case "rename_file":
 		return []snapshotScope{{path: inputValue(input, "old_path")}, {path: inputValue(input, "new_path")}}
@@ -558,7 +566,7 @@ func checkpointScopes(ctx context.Context, name string, input any) []snapshotSco
 
 func checkpointAction(name string, input any) string {
 	switch name {
-	case "create_directory", "delete_file", "write_file", "replace_in_file":
+	case "delete_file", "write_file", "replace_in_file":
 		return name + " " + filepath.Base(inputValue(input, "path"))
 	case "rename_file":
 		return "rename_file " + filepath.Base(inputValue(input, "old_path")) + " → " + filepath.Base(inputValue(input, "new_path"))

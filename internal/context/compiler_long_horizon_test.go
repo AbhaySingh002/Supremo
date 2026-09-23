@@ -106,11 +106,11 @@ func TestCompiler100RoundsLongHorizonContextComposition(t *testing.T) {
 	})
 
 	// Negative observation for missing AGENTS.md
-	fp2, cArgs2, path2, scope2 := state.ComputeCallFingerprint("search_file_name", map[string]any{"path": ".", "pattern": "AGENTS.md"}, root)
+	fp2, cArgs2, path2, scope2 := state.ComputeCallFingerprint("glob", map[string]any{"path": ".", "pattern": "AGENTS.md"}, root)
 	_, _ = store.SaveObservation(context.Background(), state.Observation{
 		SessionID:       sessionID,
 		TaskID:          taskID,
-		Tool:            "search_file_name",
+		Tool:            "glob",
 		CallFingerprint: fp2,
 		CanonicalArgs:   cArgs2,
 		Scope:           scope2,

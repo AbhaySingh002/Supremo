@@ -53,8 +53,8 @@ func TestCompilerDurableObservationsSurviveLongHorizon(t *testing.T) {
 	// B: Negative observation for missing AGENTS.md
 	obs2 := state.Observation{
 		SessionID:       sessionID,
-		Tool:            "search_file_name",
-		CallFingerprint: `search_file_name:{"path":".","pattern":"AGENTS.md"}`,
+		Tool:            "glob",
+		CallFingerprint: `glob:{"path":".","pattern":"AGENTS.md"}`,
 		Path:            "AGENTS.md",
 		Scope:           ".",
 		Summary:         "AGENTS.md absent under meal_tracker/ (0 matches)",

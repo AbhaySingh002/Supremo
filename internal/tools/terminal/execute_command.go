@@ -62,7 +62,7 @@ func (t *ExecuteCommand) Schema() any {
 			},
 			"directory": map[string]any{
 				"type":        "string",
-				"description": "Working directory for the command",
+				"description": "Optional working directory. Omit to run from the workspace root; it must be inside the workspace.",
 			},
 			"timeout": map[string]any{
 				"type":        "integer",

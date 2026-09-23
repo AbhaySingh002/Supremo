@@ -40,7 +40,6 @@ const (
 	Exit                Kind = "exit"
 	Auth                Kind = "auth"
 	Provider            Kind = "provider"
-	Providers           Kind = "providers"
 	Endpoint            Kind = "endpoint"
 	Models              Kind = "models"
 	Usage               Kind = "usage"
@@ -139,8 +138,7 @@ func standardCommands() []Command {
 		cmd("/doctor", "Check local setup without provider calls", Doctor, exact(0)),
 		cmd("/exit", "Exit Supremo", Exit, exact(0)),
 		cmd("/auth", "Enter the active provider API key securely", Auth, exact(0)),
-		cmd("/provider", "Switch provider and optional endpoint", Provider, between(1, 2)),
-		cmd("/providers", "List available providers", Providers, exact(0)),
+		cmd("/provider", "Choose a provider or add a custom OpenAI-compatible endpoint", Provider, between(1, 2)),
 		cmd("/endpoint", "Set the active provider endpoint", Endpoint, exact(1)),
 		cmd("/models", "Alias for the unified model picker", Models, optionalRefresh),
 		cmd("/usage", "Show runtime usage and account credits", Usage, optionalRefresh),

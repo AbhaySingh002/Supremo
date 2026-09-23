@@ -100,21 +100,13 @@ func (m Model) bodyView() string {
 		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, m.planQuestion.View(width, height))
 	}
 	if m.surface == surfaceApproval && m.approval != nil {
-		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, m.approval.View(width, height))
+		return m.approval.View(width, height)
 	}
 	if m.diffOpen() {
 		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, m.diffInspectorView())
 	}
 	if m.surface == surfaceHelp {
 		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, m.helpView())
-	}
-	if m.activityInspectorOpen() {
-		activityWidth := width
-		if m.width >= 80 {
-			activityWidth = min(72, max(30, width-8))
-			return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, m.activityView(activityWidth, max(8, height-2)))
-		}
-		return m.activityView(activityWidth, height)
 	}
 	if len(m.entries) == 0 && m.active == nil {
 		welcome := m.welcomeView()

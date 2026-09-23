@@ -22,8 +22,8 @@ func newTestAgentWithFSTools(t *testing.T, workspace string) *Agent {
 	_ = reg.Register(&filesystem.ReplaceInFile{})
 	_ = reg.Register(&filesystem.DeleteFile{})
 	_ = reg.Register(&filesystem.RenameFile{})
-	_ = reg.Register(&search.SearchText{})
-	_ = reg.Register(&search.SearchFileName{})
+	_ = reg.Register(&search.Grep{})
+	_ = reg.Register(&search.Glob{})
 
 	mgr := tools.NewManager(reg)
 	return &Agent{
@@ -55,7 +55,7 @@ func TestAgentSearchDoesNotAuthorizeEdit(t *testing.T) {
 	ctx := testSafetyCtx(root)
 
 	// Run step 1 (search)
-	calls1 := []models.ToolCall{{ID: "call-search", Name: "search_text", Arguments: searchCallArgs}}
+	calls1 := []models.ToolCall{{ID: "call-search", Name: "grep", Arguments: searchCallArgs}}
 	sum1 := agent.executeAll(ctx, session, calls1, ToolExecutionOptions{TaskID: "task-1"})
 	if sum1.Outcome != tools.ToolOutcomeSuccess {
 		t.Fatalf("search failed: %#v", sum1)

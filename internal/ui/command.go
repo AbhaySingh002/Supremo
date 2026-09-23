@@ -94,9 +94,6 @@ func executeCommandCmd(ctx context.Context, client api.Client, registry *command
 			}
 			initialized, callErr := client.ConfigureProvider(ctx, request)
 			result.initialize, result.err, result.output = &initialized, callErr, "Provider updated to "+provider+"."
-		case commands.Providers:
-			initialized, callErr := client.Initialize(ctx)
-			result.initialize, result.err, result.output = &initialized, callErr, formatProviders(initialized)
 		case commands.Endpoint:
 			endpoint := intent.Args[0]
 			initialized, callErr := client.ConfigureProvider(ctx, api.ConfigureProviderRequest{Endpoint: &endpoint})
@@ -391,22 +388,6 @@ func formatHealth(report api.HealthReport) string {
 		fmt.Fprintf(&out, "- %s: %s", check.Name, check.Status)
 		if check.Message != "" {
 			fmt.Fprintf(&out, " (%s)", check.Message)
-		}
-		out.WriteByte('\n')
-	}
-	return strings.TrimSpace(out.String())
-}
-
-func formatProviders(value api.InitializeResult) string {
-	var out strings.Builder
-	for _, provider := range value.Providers {
-		marker := "  "
-		if provider.ID == strings.SplitN(value.Provider, ":", 2)[0] {
-			marker = "* "
-		}
-		fmt.Fprintf(&out, "%s%s", marker, provider.Name)
-		if !provider.Configured {
-			out.WriteString(" · needs setup")
 		}
 		out.WriteByte('\n')
 	}

@@ -304,7 +304,7 @@ func TestAdaptiveBudgetAndRelevantToolSchema(t *testing.T) {
 		{Name: "read_file", Family: "filesystem", CapabilityTags: []string{"filesystem.read"}, SupportedModes: []tools.ToolMode{tools.ToolModeNormal}},
 		{Name: "write_file", Family: "filesystem", CapabilityTags: []string{"filesystem.write"}, SupportedModes: []tools.ToolMode{tools.ToolModeNormal}},
 	}}
-	route := catalog.Route(tools.ToolRouteProfile{Mode: tools.ToolModeNormal, Objective: "please use read_file", WorkingSet: []string{"tool:write_file"}})
+	route := catalog.Route(tools.ToolRouteProfile{Mode: tools.ToolModeNormal})
 	if len(route.Candidates) != 2 {
 		t.Fatalf("schema route = %#v", route)
 	}
@@ -319,43 +319,44 @@ func TestStructuredCatalogSchemaSelection(t *testing.T) {
 		{Name: "zeta", Family: "zeta", CapabilityTags: []string{"zeta"}, SupportedModes: []tools.ToolMode{tools.ToolModeNormal}},
 		{Name: "alpha", Family: "alpha", CapabilityTags: []string{"alpha"}, SupportedModes: []tools.ToolMode{tools.ToolModeNormal}},
 	}}
-	route := catalog.Route(tools.ToolRouteProfile{Mode: tools.ToolModeNormal, Objective: "use alpha"})
-	if len(route.Candidates) != 1 || route.Candidates[0].Tool.Name != "alpha" {
+	route := catalog.Route(tools.ToolRouteProfile{Mode: tools.ToolModeNormal})
+	if len(route.Candidates) != 2 || route.Candidates[0].Tool.Name != "alpha" || route.Candidates[1].Tool.Name != "zeta" {
 		t.Fatalf("selected schemas = %#v", route)
 	}
 }
 
-func TestConversationalCompileAttachesNoToolsForPureChat(t *testing.T) {
+func TestConversationalCompileAttachesStableCatalog(t *testing.T) {
 	ctx, store := context.Background(), openStore(t)
 	if _, err := store.SaveSession(ctx, state.SessionInput{ID: "chat", Name: "Chat"}); err != nil {
 		t.Fatal(err)
 	}
 	catalog := tools.ToolCatalog{Tools: []tools.ToolDescriptor{
-		{Name: "read_file", Description: "read", Family: "filesystem", CapabilityTags: []string{"filesystem.read"}, InputSchema: []byte(`{"type":"object"}`), Bootstrap: true, SupportedModes: []tools.ToolMode{tools.ToolModeNormal}, SchemaTokens: 4},
+		{Name: "read_file", Description: "read", Family: "filesystem", CapabilityTags: []string{"filesystem.read"}, InputSchema: []byte(`{"type":"object"}`), SupportedModes: []tools.ToolMode{tools.ToolModeNormal}, SchemaTokens: 4},
 		{Name: "write_file", Description: "write", Family: "filesystem", CapabilityTags: []string{"filesystem.write"}, InputSchema: []byte(`{"type":"object"}`), SupportedModes: []tools.ToolMode{tools.ToolModeNormal}, SchemaTokens: 4},
 	}}
-	prompt, err := New(store, nil).Compile(ctx, Request{
+	compiler := New(store, nil)
+	prompt, err := compiler.Compile(ctx, Request{
 		SessionID: "chat", Objective: "What is a mutex?", Control: "control", ContextLimit: 4096,
 		ToolCatalog: catalog, ToolMode: tools.ToolModeNormal, PromptMetadata: models.PromptMetadata{Profile: "conversational"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(prompt.ActiveTools) != 0 || len(prompt.ToolDefinitions) != 0 {
-		t.Fatalf("pure chat tools = %#v defs=%#v", prompt.ActiveTools, prompt.ToolDefinitions)
+	if strings.Join(prompt.ActiveTools, ",") != "read_file,write_file" || len(prompt.ToolDefinitions) != 2 {
+		t.Fatalf("stable chat tools = %#v defs=%#v", prompt.ActiveTools, prompt.ToolDefinitions)
 	}
 	if strings.Contains(prompt.System, "tool-discovery-protocol") || strings.Contains(prompt.System, "discover_tools") {
 		t.Fatalf("empty chat still advertised tool discovery:\n%s", prompt.System)
 	}
-	edit, err := New(store, nil).Compile(ctx, Request{
+	second, err := New(store, nil).Compile(ctx, Request{
 		SessionID: "chat", Objective: "edit main.go with write_file", Control: "control", ContextLimit: 4096,
 		ToolCatalog: catalog, ToolMode: tools.ToolModeNormal, PromptMetadata: models.PromptMetadata{Profile: "conversational"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(edit.ActiveTools, ",") != "write_file" {
-		t.Fatalf("edit chat tools = %#v", edit.ActiveTools)
+	if strings.Join(second.ActiveTools, ",") != "read_file,write_file" {
+		t.Fatalf("second chat tools = %#v", second.ActiveTools)
 	}
 }
 
@@ -365,9 +366,10 @@ func TestSideAnswerCompileHasNoTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	catalog := tools.ToolCatalog{Tools: []tools.ToolDescriptor{
-		{Name: "read_file", Family: "filesystem", CapabilityTags: []string{"read"}, InputSchema: []byte(`{"type":"object"}`), Bootstrap: true, SupportedModes: []tools.ToolMode{tools.ToolModeNormal, tools.ToolModeSide}, SchemaTokens: 4},
+		{Name: "read_file", Family: "filesystem", CapabilityTags: []string{"read"}, InputSchema: []byte(`{"type":"object"}`), SupportedModes: []tools.ToolMode{tools.ToolModeNormal, tools.ToolModeSide}, SchemaTokens: 4},
 	}}
-	prompt, err := New(store, nil).Compile(ctx, Request{
+	compiler := New(store, nil)
+	prompt, err := compiler.Compile(ctx, Request{
 		SessionID: "chat", Control: "control", ContextLimit: 4096,
 		ToolCatalog: catalog, ToolMode: tools.ToolModeSide, PromptMetadata: models.PromptMetadata{Profile: "side_answer"},
 	})
@@ -384,18 +386,18 @@ func TestPlanResearchCompilerExposesAllEligibleInspectionTools(t *testing.T) {
 	if _, err := store.SaveSession(ctx, state.SessionInput{ID: "chat", Name: "Chat"}); err != nil {
 		t.Fatal(err)
 	}
-	read := func(name string, core bool) tools.ToolDescriptor {
-		return tools.ToolDescriptor{Name: name, Family: "repository", CapabilityTags: []string{"repository.search"}, InputSchema: []byte(`{"type":"object"}`), Access: tools.ToolAccessRead, SideEffect: tools.ToolSideEffectNone, SupportedModes: []tools.ToolMode{tools.ToolModePlanning}, PlanningCore: core, SchemaTokens: 4}
+	read := func(name string) tools.ToolDescriptor {
+		return tools.ToolDescriptor{Name: name, Family: "repository", CapabilityTags: []string{"repository.search"}, InputSchema: []byte(`{"type":"object"}`), Access: tools.ToolAccessRead, SideEffect: tools.ToolSideEffectNone, SupportedModes: []tools.ToolMode{tools.ToolModePlanning}, SchemaTokens: 4}
 	}
 	catalog := tools.ToolCatalog{Tools: []tools.ToolDescriptor{
-		read("discover_tools", true), read("read_file", true), read("list_directory", true), read("search_file_name", true), read("repository_query", true), read("find_symbol", false),
+		read("glob"), read("grep"), read("read_file"),
 		{Name: "web_fetch", Family: "web", CapabilityTags: []string{"web.search"}, InputSchema: []byte(`{"type":"object"}`), Access: tools.ToolAccessRead, SideEffect: tools.ToolSideEffectNetwork, SupportedModes: []tools.ToolMode{tools.ToolModePlanning}, SchemaTokens: 4},
 	}}
 	prompt, err := New(store, nil).Compile(ctx, Request{SessionID: "chat", Objective: "map symbols", Control: "control", ContextLimit: 4096, ToolCatalog: catalog, ToolMode: tools.ToolModePlanning, ToolReadOnly: true, ToolResearchOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"discover_tools", "find_symbol", "list_directory", "read_file", "repository_query", "search_file_name"}
+	want := []string{"glob", "grep", "read_file"}
 	if strings.Join(prompt.ActiveTools, ",") != strings.Join(want, ",") {
 		t.Fatalf("plan research tools = %#v, want %#v", prompt.ActiveTools, want)
 	}
@@ -404,7 +406,6 @@ func TestPlanResearchCompilerExposesAllEligibleInspectionTools(t *testing.T) {
 func TestSystemCandidateDeterministicPrefixOrdering(t *testing.T) {
 	c1 := Candidate{ID: "ctrl", Layer: LayerControl, Content: "Rules"}
 	c2 := Candidate{ID: "proj", Kind: "project_instruction", Layer: LayerPinned, Content: "Instructions"}
-	c3 := Candidate{ID: "tool-disc", Kind: "tool_discovery", Layer: LayerTools, Content: "Tools"}
 	c4 := Candidate{ID: "task-doc", Kind: "task", Layer: LayerPinned, Content: "Task"}
 	c5 := Candidate{ID: "doc-state", Kind: "working_memory", Layer: LayerState, Content: "Memory"}
 	c6 := Candidate{ID: "repo-file", Layer: LayerRepository, Content: "File code"}
@@ -413,14 +414,8 @@ func TestSystemCandidateDeterministicPrefixOrdering(t *testing.T) {
 	if systemCandidateOrder(c1) >= systemCandidateOrder(c2) {
 		t.Errorf("expected Control (L0) before Pinned Static (L1)")
 	}
-	if systemCandidateOrder(c2) >= systemCandidateOrder(c3) {
-		t.Errorf("expected Pinned Static (L1) before Core Tools (L7)")
-	}
-	if systemCandidateOrder(c3) >= systemCandidateOrder(c4) {
-		t.Errorf("expected Core Tools (L7) before Pinned Dynamic (L1)")
-	}
 	if systemCandidateOrder(c4) >= systemCandidateOrder(c5) {
-		t.Errorf("expected Pinned Dynamic (L1) before State (L2)")
+		t.Errorf("expected Pinned (L1) before State (L2)")
 	}
 	if systemCandidateOrder(c5) >= systemCandidateOrder(c6) {
 		t.Errorf("expected State (L2) before Repository (L3)")
@@ -645,4 +640,37 @@ func TestCompilerRoutesEverySWEProfileToSelectForDecision(t *testing.T) {
 	if n := countKind(chat.IR.Items, "message"); n != 0 {
 		t.Fatalf("conversational reconstructed history: message items=%d", n)
 	}
+}
+
+func TestCompilerIncludesWorkspaceContextForExecution(t *testing.T) {
+	ctx, store := context.Background(), openStore(t)
+	if _, err := store.SaveSession(ctx, state.SessionInput{ID: "workspace-execution", Name: "Workspace Execution"}); err != nil {
+		t.Fatal(err)
+	}
+
+	compiler := New(store, nil)
+	prompt, err := compiler.Compile(ctx, Request{
+		SessionID: "workspace-execution", Objective: "List project files", Control: "control",
+		ContextLimit: 32_000, PromptMetadata: models.PromptMetadata{Profile: string(protocol.Execution)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt.System, "Workspace root path: "+store.Root()) {
+		t.Fatalf("execution prompt omitted workspace root: %q", prompt.System)
+	}
+	if !strings.Contains(prompt.System, "Host platform: "+hostPlatformName()) {
+		t.Fatalf("execution prompt omitted host platform: %q", prompt.System)
+	}
+
+	manifest, err := compiler.LatestManifest(ctx, "workspace-execution")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range manifest.IR.Items {
+		if item.Kind == "workspace" {
+			return
+		}
+	}
+	t.Fatalf("execution manifest omitted workspace context: %#v", manifest.IR.Items)
 }

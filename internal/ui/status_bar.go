@@ -142,16 +142,13 @@ func (m Model) FooterView() string {
 		if m.approval.IsDeciding() {
 			return m.styles.Footer.Render(m.spinner.View() + " submitting approval…")
 		}
-		return m.styles.Footer.Render(m.help.ShortHelpView(m.keys.Approval.ShortHelp()))
+		return m.styles.Footer.Render("↑↓ or 1–4 choose · Enter decide · Esc deny · y allow · a auto · e edit")
 	}
 	if m.surface == surfaceHelp {
 		return m.styles.Footer.Render("Esc return to prompt · Ctrl+P plans")
 	}
 	if m.surface >= surfaceSessions && m.surface <= surfaceKrypton {
 		return m.styles.Footer.Render(m.help.ShortHelpView(m.keys.Overlay.ShortHelp()))
-	}
-	if m.focus == focusActivity {
-		return m.styles.Footer.Render("Esc return to chat · Ctrl+B hide activity")
 	}
 	if m.selection.active() {
 		hint := "selecting"
@@ -188,7 +185,11 @@ func (m Model) FooterView() string {
 		pill := zone.Mark("unread-pill", m.styles.Warning.Render(fmt.Sprintf("%d new updates · click or End to follow", m.newOutput)))
 		return m.styles.Footer.Render(pill)
 	}
-	return m.styles.Footer.Render(m.help.ShortHelpView(m.keys.Composer.ShortHelp()))
+	help := m.help.ShortHelpView(m.keys.Composer.ShortHelp())
+	if strings.TrimSpace(m.input.Value()) == "" && m.hasLatestToolDetails() {
+		help += "  ·  ctrl+o"
+	}
+	return m.styles.Footer.Render(help)
 }
 
 // ApprovalModeView renders the authorization status indicator line.

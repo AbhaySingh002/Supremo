@@ -79,7 +79,7 @@ func (cb *RealContextBuilder) Prepare(ctx context.Context, request ContextReques
 	prepared, err := cb.compiler.Prepare(ctx, contextcompiler.Request{
 		SessionID: request.Session.ID, TaskID: taskID, Turn: request.Turn, Step: request.Step, Objective: request.Objective,
 		OverflowPressure: request.OverflowPressure, Provider: request.Session.Provider, Model: request.Session.Model,
-		ContextLimit: limit, Control: compiled.Control, PromptMetadata: compiled.Metadata, ProjectInstructions: cb.project, ToolCatalog: catalog, ToolMode: mode, ToolReadOnly: readOnly, ToolResearchOnly: researchOnly, RequiredCapabilities: request.RequiredCapabilities, ToolApprovalMode: request.Session.ApprovalMode, ToolDryRun: request.Session.DryRun, History: history,
+		ContextLimit: limit, Control: compiled.Control, PromptMetadata: compiled.Metadata, ProjectInstructions: cb.project, ToolCatalog: catalog, ToolMode: mode, ToolReadOnly: readOnly, ToolResearchOnly: researchOnly, ToolApprovalMode: request.Session.ApprovalMode, ToolDryRun: request.Session.DryRun, History: history,
 	})
 	if err != nil {
 		return nil, err

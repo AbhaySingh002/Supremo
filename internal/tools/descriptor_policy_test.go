@@ -11,7 +11,7 @@ func TestDescriptorDrivesInspectionApprovalReadOnlyAndPlanning(t *testing.T) {
 	mutate := catalogTool{name: "mutate_x", caps: CapabilityWriteWorkspace}
 	if err := registry.Register(inspect, ToolMetadata{
 		CanonicalName: "inspect_x", Family: "filesystem", Access: ToolAccessRead,
-		Inspection: true, PersistCallObservation: true, PlanningCore: true,
+		Inspection: true, PersistCallObservation: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestDescriptorDrivesInspectionApprovalReadOnlyAndPlanning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	route := catalog.Route(ToolRouteProfile{Mode: ToolModePlanning, ReadOnly: true, ResearchOnly: true, Objective: "inspect"})
+	route := catalog.Route(ToolRouteProfile{Mode: ToolModePlanning, ReadOnly: true, ResearchOnly: true})
 	got := map[string]bool{}
 	for _, c := range route.Candidates {
 		got[c.Tool.Name] = true

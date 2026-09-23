@@ -42,8 +42,8 @@ func (t *managerTestTool) Capabilities() CapabilitySet {
 	switch t.name {
 	case "read_file":
 		return CapabilityReadWorkspace
-	case "git_status", "git_diff":
-		return CapabilityReadWorkspace | CapabilityExecuteProcess
+	case "execute_command":
+		return CapabilityExecuteProcess
 	case "web_fetch":
 		return CapabilityUseNetwork
 	default:
@@ -232,8 +232,8 @@ func TestManagerRejectsMutationInReadOnlySubagent(t *testing.T) {
 	}
 }
 
-func TestManagerRejectsWorkingTreeGitInspectionAndNetworkInReadOnlySubagent(t *testing.T) {
-	for _, name := range []string{"git_status", "git_diff", "web_fetch"} {
+func TestManagerRejectsProcessAndNetworkToolsInReadOnlySubagent(t *testing.T) {
+	for _, name := range []string{"execute_command", "web_fetch"} {
 		t.Run(name, func(t *testing.T) {
 			tool := &managerTestTool{name: name}
 			registry := NewRegistry()
@@ -242,7 +242,7 @@ func TestManagerRejectsWorkingTreeGitInspectionAndNetworkInReadOnlySubagent(t *t
 			}
 			_, err := NewManager(registry).Execute(WithReadOnly(context.Background()), name, map[string]any{"directory": "."})
 			if err == nil || !strings.Contains(err.Error(), "not allowed in a read-only execution context") || tool.calls != 0 {
-				t.Fatalf("read-only Git inspection ran: err=%v calls=%d", err, tool.calls)
+				t.Fatalf("read-only tool ran: err=%v calls=%d", err, tool.calls)
 			}
 		})
 	}
@@ -275,8 +275,7 @@ func TestManagerPlanResearchAllowsOnlyLocalInspection(t *testing.T) {
 	for name, caps := range map[string]CapabilitySet{
 		"read_file":       CapabilityReadWorkspace,
 		"write_file":      CapabilityWriteWorkspace,
-		"execute_command": CapabilityReadWorkspace | CapabilityExecuteProcess,
-		"git_status":      CapabilityReadWorkspace | CapabilityExecuteProcess,
+		"execute_command": CapabilityExecuteProcess,
 		"web_fetch":       CapabilityReadWorkspace | CapabilityUseNetwork,
 	} {
 		tool := &managerTestTool{name: name, capabilities: caps}
@@ -286,11 +285,11 @@ func TestManagerPlanResearchAllowsOnlyLocalInspection(t *testing.T) {
 		}
 	}
 	manager := NewManager(registry)
-	ctx := WithActiveTools(WithResearchOnly(WithApprovalMode(context.Background(), ApprovalSuperman)), []string{"read_file", "write_file", "execute_command", "git_status", "web_fetch"})
+	ctx := WithActiveTools(WithResearchOnly(WithApprovalMode(context.Background(), ApprovalSuperman)), []string{"read_file", "write_file", "execute_command", "web_fetch"})
 	if _, err := manager.Execute(ctx, "read_file", map[string]any{"path": "README.md"}); err != nil || registered["read_file"].calls != 1 {
 		t.Fatalf("local read was not allowed: err=%v calls=%d", err, registered["read_file"].calls)
 	}
-	for _, name := range []string{"write_file", "execute_command", "git_status", "web_fetch"} {
+	for _, name := range []string{"write_file", "execute_command", "web_fetch"} {
 		if _, err := manager.Execute(ctx, name, map[string]any{}); err == nil || !strings.Contains(err.Error(), "not allowed during local plan research") || registered[name].calls != 0 {
 			t.Fatalf("plan research ran %s: err=%v calls=%d", name, err, registered[name].calls)
 		}

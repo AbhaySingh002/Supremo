@@ -13,20 +13,19 @@ type ComposerKeyMap struct {
 	Plans       key.Binding
 	ToggleMode  key.Binding
 	ToggleDebug key.Binding
-	Activity    key.Binding
 	Clear       key.Binding
 	Help        key.Binding
 	Cancel      key.Binding
 }
 
 func (k ComposerKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Submit, k.Complete, k.Plans, k.Activity, k.Help}
+	return []key.Binding{k.Submit, k.Complete, k.Plans, k.Help}
 }
 
 func (k ComposerKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Submit, k.Newline, k.Complete},
-		{k.Plans, k.ToggleMode, k.Activity, k.ToggleDebug},
+		{k.Plans, k.ToggleMode, k.ToggleDebug},
 		{k.Clear, k.Help, k.Cancel},
 	}
 }
@@ -41,18 +40,19 @@ type FeedKeyMap struct {
 	Bottom     key.Binding
 	Copy       key.Binding
 	Evidence   key.Binding
+	Expand     key.Binding
 	Clear      key.Binding
 	FocusInput key.Binding
 }
 
 func (k FeedKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.ScrollUp, k.ScrollDown, k.PgUp, k.PgDown, k.Bottom}
+	return []key.Binding{k.ScrollUp, k.ScrollDown, k.PgUp, k.PgDown, k.Expand}
 }
 
 func (k FeedKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.ScrollUp, k.ScrollDown, k.PgUp, k.PgDown},
-		{k.Top, k.Bottom, k.Copy, k.Evidence, k.Clear, k.FocusInput},
+		{k.Top, k.Bottom, k.Copy, k.Evidence, k.Expand, k.Clear, k.FocusInput},
 	}
 }
 
@@ -233,7 +233,6 @@ func newKeyMap() KeyMap {
 			Plans:       key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "plans")),
 			ToggleMode:  key.NewBinding(key.WithKeys("ctrl+m"), key.WithHelp("ctrl+m", "mode")),
 			ToggleDebug: key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "debug")),
-			Activity:    key.NewBinding(key.WithKeys("ctrl+b"), key.WithHelp("ctrl+b", "activity")),
 			Clear:       key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("ctrl+l", "clear")),
 			Help:        key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 			Cancel:      key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "cancel")),
@@ -247,6 +246,7 @@ func newKeyMap() KeyMap {
 			Bottom:     key.NewBinding(key.WithKeys("end"), key.WithHelp("end", "bottom")),
 			Copy:       key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "copy")),
 			Evidence:   key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "evidence")),
+			Expand:     key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("ctrl+o", "open")),
 			Clear:      key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear")),
 			FocusInput: key.NewBinding(key.WithKeys("ctrl+n"), key.WithHelp("ctrl+n", "input")),
 		},

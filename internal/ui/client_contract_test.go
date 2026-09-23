@@ -24,6 +24,7 @@ type behaviorClient struct {
 	response   api.RespondInteractionRequest
 	catalog    api.ModelCatalog
 	configured api.ConfigureProviderRequest
+	artifact   api.Artifact
 }
 
 type behaviorStream struct {
@@ -53,6 +54,10 @@ func (c *behaviorClient) ListModels(_ context.Context, _ api.ListModelsRequest) 
 func (c *behaviorClient) ConfigureProvider(_ context.Context, request api.ConfigureProviderRequest) (api.InitializeResult, error) {
 	c.configured = request
 	return api.InitializeResult{Provider: valueOr(request.Provider, "openai"), Model: valueOr(request.Model, "gpt-test"), CredentialReady: true}, nil
+}
+
+func (c *behaviorClient) GetArtifact(_ context.Context, _ api.ArtifactRequest) (api.Artifact, error) {
+	return c.artifact, nil
 }
 
 func valueOr(value *string, fallback string) string {
@@ -289,7 +294,7 @@ func TestEvidenceUnwrapsStorageEnvelopeIntoInlineDetails(t *testing.T) {
 	}
 }
 
-func TestResponsiveChatAndActivityModes(t *testing.T) {
+func TestResponsiveChatAndContextualActivityRail(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	model := newTestModel(api.Session{ID: "chat", Name: "Chat"}, ctx, cancel)
@@ -304,23 +309,41 @@ func TestResponsiveChatAndActivityModes(t *testing.T) {
 
 	updated, _ = model.Update(tea.WindowSizeMsg{Width: 60, Height: 24})
 	model = updated.(Model)
-	if strings.Contains(model.View().Content, "ACTIVITY") {
-		t.Fatal("compact chat should not show activity until requested")
+	if model.activityRailWidth() != 0 || model.contentWidth() != model.width {
+		t.Fatal("ordinary compact chat should keep the full transcript width")
 	}
-	updated, _ = model.Update(tea.KeyPressMsg{Mod: tea.ModCtrl, Code: 'b'})
-	model = updated.(Model)
-	if model.focus != focusActivity || !strings.Contains(model.View().Content, "ACTIVITY") {
-		t.Fatal("compact activity inspector did not open")
-	}
-
-	model.activityToggled = false
+	model.activity = []activityEvent{{Tool: "glob", Status: "completed", Arguments: `{"path":".","pattern":"*.go"}`}}
 	updated, _ = model.Update(tea.WindowSizeMsg{Width: 130, Height: 32})
 	model = updated.(Model)
-	if model.activityRailWidth() < 30 || !strings.Contains(model.View().Content, "ACTIVITY") || model.contentWidth() >= model.width {
-		t.Fatal("wide activity rail did not reserve chat width")
+	if model.activityRailWidth() != 0 || model.contentWidth() != model.width || strings.Contains(model.View().Content, "ACTIVITY") {
+		t.Fatal("ordinary wide chat should not show an activity rail")
+	}
+
+	model.session.PlanMode = true
+	model.layout()
+	if model.activityRailWidth() < 30 || !strings.Contains(model.View().Content, "PLAN") || model.contentWidth() >= model.width {
+		t.Fatal("plan mode should show a contextual rail")
+	}
+
+	model.session.PlanMode = false
+	model.agents = []api.Agent{{ID: "complete", Label: "complete", Status: "idle"}}
+	model.layout()
+	if model.activityRailWidth() != 0 || model.contentWidth() != model.width {
+		t.Fatal("completed subagents should not keep the rail open")
+	}
+
+	model.agents = []api.Agent{{ID: "active", Label: "inspect", Status: "running"}}
+	model.layout()
+	if model.activityRailWidth() < 30 || !strings.Contains(model.View().Content, "AGENTS") || model.contentWidth() >= model.width {
+		t.Fatal("active subagent should show a contextual rail")
+	}
+
+	updated, _ = model.Update(tea.WindowSizeMsg{Width: 100, Height: 28})
+	model = updated.(Model)
+	if model.activityRailWidth() != 0 || model.contentWidth() != model.width {
+		t.Fatal("compact terminals must not open a contextual activity inspector")
 	}
 	for _, size := range []struct{ width, height int }{{44, 14}, {60, 24}, {100, 28}, {130, 32}, {198, 53}} {
-		model.activityToggled = false
 		updated, _ = model.Update(tea.WindowSizeMsg{Width: size.width, Height: size.height})
 		model = updated.(Model)
 		content := model.View().Content
@@ -333,6 +356,55 @@ func TestResponsiveChatAndActivityModes(t *testing.T) {
 				t.Fatalf("%dx%d render row %d is %d cells", size.width, size.height, row, width)
 			}
 		}
+	}
+}
+
+func TestContextualActivityRailReflowsFromSessionUpdates(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	model := newTestModel(api.Session{ID: "chat", Name: "Chat"}, ctx, cancel)
+	model.width, model.height = 130, 32
+	model.layout()
+
+	payload, err := json.Marshal(api.PlanModeUpdate{Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	model.applyAPIEvent(api.Event{Type: api.EventPlanMode, Data: payload})
+	if model.activityRailWidth() == 0 || model.contentWidth() >= model.width {
+		t.Fatal("plan-mode event did not resize the contextual rail")
+	}
+
+	payload, err = json.Marshal(api.PlanModeUpdate{Active: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	model.applyAPIEvent(api.Event{Type: api.EventPlanMode, Data: payload})
+	if model.activityRailWidth() != 0 || model.contentWidth() != model.width {
+		t.Fatal("leaving plan mode did not restore the transcript width")
+	}
+
+	model.applySnapshot(api.SessionSnapshot{
+		Session: model.session,
+		Agents:  []api.Agent{{ID: "agent-1", Label: "inspect", Status: "running"}},
+	})
+	if model.activityRailWidth() == 0 || model.contentWidth() >= model.width {
+		t.Fatal("active subagent snapshot did not resize the contextual rail")
+	}
+
+	model.applySnapshot(api.SessionSnapshot{
+		Session: model.session,
+		Agents:  []api.Agent{{ID: "agent-1", Label: "inspect", Status: "idle"}},
+	})
+	if model.activityRailWidth() != 0 || model.contentWidth() != model.width {
+		t.Fatal("completed subagent snapshot did not restore the transcript width")
+	}
+}
+
+func TestActivityCommandKeepsItsFormattedOutput(t *testing.T) {
+	output := "- 12:34:56 glob: completed"
+	if got := conciseCommandOutput("/activity", output); got != output {
+		t.Fatalf("activity output = %q, want %q", got, output)
 	}
 }
 

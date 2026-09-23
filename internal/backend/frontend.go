@@ -3,7 +3,6 @@ package backend
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -18,7 +17,6 @@ import (
 	"github.com/AbhaySingh002/supremo/internal/providers"
 	"github.com/AbhaySingh002/supremo/internal/repository"
 	"github.com/AbhaySingh002/supremo/internal/tools"
-	toolgit "github.com/AbhaySingh002/supremo/internal/tools/git"
 )
 
 const artifactPreviewLimit = 64 << 10
@@ -224,22 +222,42 @@ func (s *Service) ToolActivity(_ context.Context, request api.SessionRequest) ([
 }
 
 func (s *Service) WorkspaceStatus(ctx context.Context) (api.WorkspaceStatus, error) {
-	result, err := (&toolgit.GitStatus{}).Execute(tools.WithWorkspace(ctx, s.workspace), toolgit.GitStatusInput{Directory: "."})
 	status := api.WorkspaceStatus{Workspace: s.workspace}
-	if err != nil || result == nil || !result.Success {
+	if _, err := runWorkspaceCommand(ctx, s.workspace, "git", "rev-parse", "--git-dir"); err != nil {
 		status.Error = "not a git workspace"
 		return status, nil
 	}
-	data, err := json.Marshal(result.Data)
+	branch, err := runWorkspaceCommand(ctx, s.workspace, "git", "branch", "--show-current")
 	if err != nil {
-		return status, err
+		branch = []byte("HEAD")
 	}
-	var value toolgit.GitStatusOutput
-	if err := json.Unmarshal(data, &value); err != nil {
-		return status, err
+	porcelain, err := runWorkspaceCommand(ctx, s.workspace, "git", "status", "--porcelain")
+	if err != nil {
+		status.Error = "not a git workspace"
+		return status, nil
 	}
-	status.Branch, status.Changed, status.Git, status.Ready = value.Branch, len(value.Staged)+len(value.Modified)+len(value.Untracked), true, true
+	status.Branch = strings.TrimSpace(string(branch))
+	status.Changed = workspaceChangedCount(string(porcelain))
+	status.Git, status.Ready = true, true
 	return status, nil
+}
+
+func workspaceChangedCount(porcelain string) int {
+	changed := 0
+	for _, line := range strings.Split(porcelain, "\n") {
+		if len(line) < 2 {
+			continue
+		}
+		if line[0] == '?' {
+			changed++
+		} else if line[0] != ' ' {
+			changed++
+		}
+		if line[1] != ' ' && line[1] != '?' {
+			changed++
+		}
+	}
+	return changed
 }
 
 func (s *Service) WorkspaceDiff(ctx context.Context) (api.Diff, error) {

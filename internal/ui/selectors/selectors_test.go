@@ -3,6 +3,7 @@ package selectors_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -14,7 +15,7 @@ import (
 func TestCommandMenuFiltersAndNavigatesIndependently(t *testing.T) {
 	menu := selectors.NewCommandMenu([]selectors.Command{
 		{Name: "/plan", Description: "Draft a plan"},
-		{Name: "/providers", Description: "List providers"},
+		{Name: "/provider", Description: "Choose a provider"},
 		{Name: "/help", Description: "Show help"},
 	}, theme.Default())
 
@@ -33,8 +34,8 @@ func TestCommandMenuFiltersAndNavigatesIndependently(t *testing.T) {
 	updated, _ = menu.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	menu = updated.(selectors.CommandMenu)
 	selected, ok = menu.Selected()
-	if !ok || selected.Name != "/providers" {
-		t.Fatalf("expected /providers selected after down arrow, got %+v", selected)
+	if !ok || selected.Name != "/provider" {
+		t.Fatalf("expected /provider selected after down arrow, got %+v", selected)
 	}
 
 	updated, _ = menu.Update(selectors.CommandQueryMsg{Query: "/"})
@@ -129,5 +130,145 @@ func TestModelSelectorUsesTheSameRadioListInteraction(t *testing.T) {
 	msg = cmd()
 	if _, ok := msg.(selectors.ProviderSelectorDismissedMsg); !ok {
 		t.Fatalf("expected ProviderSelectorDismissedMsg, got %#v", msg)
+	}
+}
+
+func runFast(cmd tea.Cmd) tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	ch := make(chan tea.Msg, 1)
+	go func() {
+		ch <- cmd()
+	}()
+	select {
+	case msg := <-ch:
+		return msg
+	case <-time.After(20 * time.Millisecond):
+		return nil
+	}
+}
+
+func updateSelector(s selectors.ProviderSelector, msg tea.Msg) (selectors.ProviderSelector, tea.Cmd) {
+	updated, cmd := s.Update(msg)
+	s = updated.(selectors.ProviderSelector)
+	if cmd != nil {
+		res := runFast(cmd)
+		if batch, ok := res.(tea.BatchMsg); ok {
+			for _, c := range batch {
+				if c != nil {
+					subMsg := runFast(c)
+					if subMsg != nil {
+						subUpdated, _ := s.Update(subMsg)
+						s = subUpdated.(selectors.ProviderSelector)
+					}
+				}
+			}
+		} else if res != nil {
+			subUpdated, _ := s.Update(res)
+			s = subUpdated.(selectors.ProviderSelector)
+		}
+	}
+	return s, cmd
+}
+
+func TestModelSelectorFilterNavigationAndSelection(t *testing.T) {
+	models := []selectors.Provider{
+		{ID: "gpt-4.1", Name: "GPT-4.1", Description: "Flagship model"},
+		{ID: "claude-3-7-sonnet", Name: "Claude 3.7 Sonnet", Description: "Anthropic model"},
+		{ID: "claude-3-5-haiku", Name: "Claude 3.5 Haiku", Description: "Fast Anthropic model"},
+	}
+	selector := selectors.NewModelSelector(models, theme.Default())
+
+	// Start filtering with '/' and type 'claude'
+	selector, _ = updateSelector(selector, tea.KeyPressMsg{Code: '/', Text: "/"})
+	for _, char := range "claude" {
+		selector, _ = updateSelector(selector, tea.KeyPressMsg{Code: rune(char), Text: string(char)})
+	}
+
+	// Verify first filtered item is highlighted
+	selected, ok := selector.Selected()
+	if !ok || selected.ID != "claude-3-7-sonnet" {
+		t.Fatalf("expected claude-3-7-sonnet selected first, got %+v", selected)
+	}
+
+	// Down arrow navigates to next item
+	selector, _ = updateSelector(selector, tea.KeyPressMsg{Code: tea.KeyDown})
+	selected, ok = selector.Selected()
+	if !ok || selected.ID != "claude-3-5-haiku" {
+		t.Fatalf("expected claude-3-5-haiku selected after down arrow, got %+v", selected)
+	}
+
+	// Hit Enter to select while filtering
+	_, cmd := selector.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected Enter while filtering to emit selection command")
+	}
+	msg := cmd()
+	selectedMsg, ok := msg.(selectors.ModelSelectedMsg)
+	if !ok || selectedMsg.ID != "claude-3-5-haiku" {
+		t.Fatalf("expected claude-3-5-haiku selected, got %#v", msg)
+	}
+}
+
+func TestModelSelectorGroupedProviderView(t *testing.T) {
+	models := []selectors.Provider{
+		{ID: "gpt-4o", ProviderID: "openai", ProviderName: "OpenAI", Name: "GPT-4o", Description: "128k", Active: true},
+		{ID: "o3-mini", ProviderID: "openai", ProviderName: "OpenAI", Name: "o3-mini", Description: "200k"},
+		{ID: "nemotron-3.5", ProviderID: "opencode-zen", ProviderName: "OpenCode Zen", Name: "Nemotron 3.5 Lightning Free", Description: "Free"},
+	}
+	selector := selectors.NewModelSelector(models, theme.Default())
+	selector.SetSize(80, 24)
+
+	view := selector.View().Content
+	if !strings.Contains(view, "Search") {
+		t.Fatalf("expected search prompt 'Search', got:\n%s", view)
+	}
+	if !strings.Contains(view, "esc") {
+		t.Fatalf("expected 'esc' key hint, got:\n%s", view)
+	}
+	if !strings.Contains(view, "OpenAI") {
+		t.Fatalf("expected provider section header 'OpenAI', got:\n%s", view)
+	}
+	if !strings.Contains(view, "OpenCode Zen") {
+		t.Fatalf("expected provider section header 'OpenCode Zen', got:\n%s", view)
+	}
+	if !strings.Contains(view, "Nemotron 3.5 Lightning Free") {
+		t.Fatalf("expected model name 'Nemotron 3.5 Lightning Free', got:\n%s", view)
+	}
+	if !strings.Contains(view, "128k") {
+		t.Fatalf("expected context length tag '128k', got:\n%s", view)
+	}
+}
+
+func TestModelSelectorMouseWheelScroll(t *testing.T) {
+	models := []selectors.Provider{
+		{ID: "gpt-4o", Name: "GPT-4o"},
+		{ID: "o3-mini", Name: "o3-mini"},
+		{ID: "claude-3-7-sonnet", Name: "Claude 3.7 Sonnet"},
+	}
+	selector := selectors.NewModelSelector(models, theme.Default())
+	selector.SetSize(80, 24)
+
+	// Cursor starts at 0
+	selected, ok := selector.Selected()
+	if !ok || selected.ID != "gpt-4o" {
+		t.Fatalf("expected gpt-4o, got %+v", selected)
+	}
+
+	// Trackpad / mouse wheel down scrolls down
+	updated, _ := selector.Update(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown}))
+	selector = updated.(selectors.ProviderSelector)
+	selected, ok = selector.Selected()
+	if !ok || selected.ID != "o3-mini" {
+		t.Fatalf("expected o3-mini after wheel down, got %+v", selected)
+	}
+
+	// Trackpad / mouse wheel up scrolls back up
+	updated, _ = selector.Update(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp}))
+	selector = updated.(selectors.ProviderSelector)
+	selected, ok = selector.Selected()
+	if !ok || selected.ID != "gpt-4o" {
+		t.Fatalf("expected gpt-4o after wheel up, got %+v", selected)
 	}
 }

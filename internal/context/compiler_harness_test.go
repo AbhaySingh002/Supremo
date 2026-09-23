@@ -120,9 +120,9 @@ func TestCausalAtomicInteractionPruning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	call := models.ToolCall{ID: "call-a", Name: "search_text", Arguments: json.RawMessage(`{"query":"test"}`)}
+	call := models.ToolCall{ID: "call-a", Name: "grep", Arguments: json.RawMessage(`{"query":"test"}`)}
 	callBytes, _ := json.Marshal(call)
-	metaBytes, _ := json.Marshal(map[string]string{"tool_call_id": "call-a", "tool_name": "search_text"})
+	metaBytes, _ := json.Marshal(map[string]string{"tool_call_id": "call-a", "tool_name": "grep"})
 
 	// Append paired assistant call and tool result
 	_, _ = store.AppendMessage(ctx, state.MessageInput{
@@ -152,7 +152,7 @@ func TestCausalAtomicInteractionPruning(t *testing.T) {
 		ContextLimit: 4096,
 		History: []models.Message{
 			{Role: models.RoleAssistant, ToolCalls: []models.ToolCall{call}},
-			{Role: models.RoleTool, Content: "search match 1", ToolCallID: "call-a", ToolName: "search_text"},
+			{Role: models.RoleTool, Content: "search match 1", ToolCallID: "call-a", ToolName: "grep"},
 		},
 	})
 	if err != nil {

@@ -216,7 +216,7 @@ func ComputeCallFingerprint(toolName string, rawArgs any, root string) (string, 
 		}
 		canonical["path"] = path
 		scope = path
-	case "search_file_name":
+	case "glob", "search_file_name":
 		if path == "" {
 			path = "."
 		}
@@ -224,7 +224,7 @@ func ComputeCallFingerprint(toolName string, rawArgs any, root string) (string, 
 		canonical["path"] = path
 		canonical["pattern"] = pattern
 		scope = path
-	case "grep_search", "search_text":
+	case "grep", "grep_search", "search_text":
 		if path == "" {
 			path = "."
 		}
@@ -455,7 +455,7 @@ func ExtractObservationSummary(toolName, path string, resultData map[string]any,
 		}
 		return fmt.Sprintf("Directory %q (%d entries): %s", path, len(entries), strings.Join(preview, ", ")), false, sourceHash
 
-	case "search_file_name":
+	case "glob", "search_file_name":
 		var matches []string
 		parsed := false
 		if data != nil {
@@ -464,23 +464,27 @@ func ExtractObservationSummary(toolName, path string, resultData map[string]any,
 				for _, match := range m {
 					if str, ok := match.(string); ok {
 						matches = append(matches, str)
+					} else if item, ok := match.(map[string]any); ok {
+						if path, ok := item["path"].(string); ok {
+							matches = append(matches, path)
+						}
 					}
 				}
 			}
 		}
 		if !parsed {
-			return fmt.Sprintf("search_file_name in %q completed", path), false, ""
+			return fmt.Sprintf("%s in %q completed", toolName, path), false, ""
 		}
 		if len(matches) == 0 {
-			return fmt.Sprintf("search_file_name in %q: 0 matches (not found)", path), true, ""
+			return fmt.Sprintf("%s in %q: 0 matches (not found)", toolName, path), true, ""
 		}
 		preview := matches
 		if len(preview) > 6 {
 			preview = append(preview[:6], "...")
 		}
-		return fmt.Sprintf("search_file_name in %q found %d match(es): %s", path, len(matches), strings.Join(preview, ", ")), false, ""
+		return fmt.Sprintf("%s in %q found %d match(es): %s", toolName, path, len(matches), strings.Join(preview, ", ")), false, ""
 
-	case "grep_search", "search_text":
+	case "grep", "grep_search", "search_text":
 		count := 0
 		parsed := false
 		if data != nil {
@@ -612,7 +616,7 @@ func IsObservationValid(ctx context.Context, obs Observation, store Repository, 
 		return true
 	}
 
-	if obs.Tool == "search_file_name" || obs.Tool == "grep_search" || obs.Tool == "search_text" || obs.Tool == "repository_query" {
+	if obs.Tool == "glob" || obs.Tool == "search_file_name" || obs.Tool == "grep" || obs.Tool == "grep_search" || obs.Tool == "search_text" || obs.Tool == "repository_query" {
 		if store != nil {
 			files, err := store.RepositoryFiles(ctx)
 			if err == nil {

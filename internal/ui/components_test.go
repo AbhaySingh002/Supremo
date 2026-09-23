@@ -265,7 +265,7 @@ func TestProviderSelectorDismissalRestoresLayoutAndHeight(t *testing.T) {
 	}
 }
 
-func TestLocalShellCommandExpandsOutputByDefault(t *testing.T) {
+func TestLocalShellCommandStaysCollapsedUntilOpened(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	model := newTestModel(api.Session{ID: "local-shell-test"}, ctx, cancel)
@@ -277,8 +277,8 @@ func TestLocalShellCommandExpandsOutputByDefault(t *testing.T) {
 	if len(model.entries) < 1 {
 		t.Fatalf("expected at least 1 entry, got %d", len(model.entries))
 	}
-	if !model.entries[0].expanded {
-		t.Fatal("expected running local shell entry to be expanded by default")
+	if model.entries[0].expanded {
+		t.Fatal("expected running local shell entry to start collapsed")
 	}
 
 	taskID := model.active.id
@@ -297,16 +297,25 @@ func TestLocalShellCommandExpandsOutputByDefault(t *testing.T) {
 	if len(model.entries) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(model.entries))
 	}
-	if !model.entries[0].expanded {
-		t.Fatal("expected completed local shell entry to remain expanded")
+	if model.entries[0].expanded {
+		t.Fatal("expected completed local shell entry to remain collapsed")
 	}
-	if model.entries[0].toolStatus != "completed" {
-		t.Fatalf("expected completed status, got %s", model.entries[0].toolStatus)
+	if model.entries[0].toolStatus != "completed" || model.entries[0].content != "Ran command" {
+		t.Fatalf("expected completed command entry, got %#v", model.entries[0])
 	}
 
 	rendered := model.renderEntry(0, model.entries[0])
-	if !strings.Contains(rendered, "/Users/test/workspace") {
-		t.Fatalf("expected shell output in rendered entry, got:\n%s", rendered)
+	if !strings.Contains(rendered, "Ran command") || !strings.Contains(rendered, "Ctrl+O") || !strings.Contains(rendered, model.glyph("└", "\\")+" $ pwd") || strings.Contains(rendered, "/Users/test/workspace") {
+		t.Fatalf("expected compact shell entry, got:\n%s", rendered)
+	}
+
+	model.openToolDetails(0)
+	if !model.entries[0].expanded {
+		t.Fatalf("expected local shell drawer to open: %#v", model.entries[0])
+	}
+	rendered = model.renderEntry(0, model.entries[0])
+	if !strings.Contains(rendered, "$ pwd") || !strings.Contains(rendered, "/Users/test/workspace") || strings.Count(rendered, "$ pwd") != 1 {
+		t.Fatalf("expected expanded shell drawer (details=%q), got:\n%s", model.entries[0].details, rendered)
 	}
 }
 
@@ -451,5 +460,52 @@ func TestComposerBackslashContinuationAndCtrlO(t *testing.T) {
 	}
 	if h := model.input.Height(); h != 3 {
 		t.Fatalf("expected composer height 3, got %d", h)
+	}
+}
+
+func TestCredentialPasteDoesNotPolluteComposer(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	model := newTestModel(api.Session{ID: "cred-paste-test"}, ctx, cancel)
+	model.width, model.height = 80, 24
+	model.layout()
+
+	// Open credential modal
+	cmd := model.openCredential(api.Provider{ID: "openai", Name: "OpenAI", RequiresEndpoint: false})
+	if cmd != nil {
+		model.Update(cmd())
+	}
+	if model.surface != surfaceCredential || model.credential == nil {
+		t.Fatal("expected surfaceCredential active")
+	}
+
+	// Paste API key into credential modal
+	apiKey := "sk-test-secret-key-12345"
+	updated, _ := model.Update(tea.PasteMsg{Content: apiKey})
+	model = updated.(Model)
+
+	if model.credential == nil {
+		t.Fatal("expected credential modal to remain open")
+	}
+	if val := model.credential.key.Value(); val != apiKey {
+		t.Fatalf("expected credential key to receive pasted text %q, got %q", apiKey, val)
+	}
+	if composerVal := model.input.Value(); composerVal != "" {
+		t.Fatalf("expected composer input to remain empty, got %q", composerVal)
+	}
+
+	// Cancel credential modal with Esc
+	updated, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	model = updated.(Model)
+	if cmd != nil {
+		updated, _ = model.Update(cmd())
+		model = updated.(Model)
+	}
+
+	if model.surface != surfaceNone {
+		t.Fatalf("expected surfaceNone after cancel, got %v", model.surface)
+	}
+	if composerVal := model.input.Value(); composerVal != "" {
+		t.Fatalf("expected composer input to remain empty after cancelling modal, got %q", composerVal)
 	}
 }

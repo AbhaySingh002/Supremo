@@ -97,14 +97,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		if !m.activityToggled {
-			m.showActivity = m.width >= 120
-		}
-		if m.width >= 120 && m.focus == focusActivity {
-			m.focus = focusComposer
-			m.surface = surfaceNone
-			m.input.Focus()
-		}
 		m.selection = nil
 		m.invalidateRenderCache()
 		m.layout()
@@ -218,6 +210,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshLiveFeed()
 		return m, cmd
 	case tea.MouseMsg:
+		if m.surface == surfaceModel && m.modelSelector != nil {
+			updated, cmd := m.modelSelector.Update(msg)
+			selector := updated.(selectors.ProviderSelector)
+			m.modelSelector = &selector
+			return m, cmd
+		}
+		if m.surface == surfaceProvider && m.providerSelector != nil {
+			updated, cmd := m.providerSelector.Update(msg)
+			selector := updated.(selectors.ProviderSelector)
+			m.providerSelector = &selector
+			return m, cmd
+		}
 		mouse := msg.Mouse()
 		if m.diffOpen() {
 			var cmd tea.Cmd
@@ -252,17 +256,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if isClick && (mouse.Button == tea.MouseLeft || mouse.Button == tea.MouseNone) {
 			// 1. Approval modal mouse actions
 			if m.approval != nil {
-				if zoneInBounds("approval-allow", mouse.X, mouse.Y) {
-					return m.updateApprovalKey(tea.KeyPressMsg{Code: 'y', Text: "y"})
-				}
-				if zoneInBounds("approval-deny", mouse.X, mouse.Y) {
-					return m.updateApprovalKey(tea.KeyPressMsg{Code: 'n', Text: "n"})
-				}
-				if zoneInBounds("approval-edit", mouse.X, mouse.Y) {
-					return m.updateApprovalKey(tea.KeyPressMsg{Code: 'e', Text: "e"})
-				}
-				if zoneInBounds("approval-auto", mouse.X, mouse.Y) {
-					return m.updateApprovalKey(tea.KeyPressMsg{Code: 'a', Text: "a"})
+				for choice := 0; choice < 4; choice++ {
+					if zoneInBounds(fmt.Sprintf("approval-choice-%d", choice), mouse.X, mouse.Y) {
+						m.approval.Select(choice)
+						return m.updateApprovalKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+					}
 				}
 				return m, nil
 			}
@@ -310,40 +308,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.rebuildFeed()
 						return m, nil
 					}
-					if m.entries[i].artifactID != "" && zoneInBounds(fmt.Sprintf("artifact-%d", i), mouse.X, mouse.Y) {
-						if m.entries[i].expanded {
-							m.entries[i].expanded = false
-							m.invalidateFeedPrefix()
-							m.rebuildFeed()
-							return m, nil
-						}
-						return m, loadArtifactCmd(m.ctx, m.client, m.session.ID, i, m.entries[i].artifactID)
-					}
 					if zoneInBounds(fmt.Sprintf("tool-%d", i), mouse.X, mouse.Y) || m.zoneInRow(fmt.Sprintf("tool-%d", i), mouse.X, mouse.Y) {
-						m.entries[i].expanded = !m.entries[i].expanded
-						m.entries[i].detailOffset = 0
-						m.invalidateFeedPrefix()
-						m.rebuildFeed()
-						return m, nil
+						return m, m.openToolDetails(i)
 					}
 				}
 				if m.entries[i].kind == entryDiff && (zoneInBounds(fmt.Sprintf("diff-%d", i), mouse.X, mouse.Y) || m.zoneInRow(fmt.Sprintf("diff-%d", i), mouse.X, mouse.Y)) {
 					return m, m.openDiffInspector(i)
-				}
-			}
-
-			// 6. Activity rail tool clicks -> toggle corresponding tool entry
-			for i := range m.activity {
-				if zoneInBounds(fmt.Sprintf("activity-tool-%d", i), mouse.X, mouse.Y) {
-					for j := len(m.entries) - 1; j >= 0; j-- {
-						if m.entries[j].kind == entryTool && m.entries[j].tool == m.activity[i].Tool {
-							m.entries[j].expanded = !m.entries[j].expanded
-							m.entries[j].detailOffset = 0
-							m.invalidateFeedPrefix()
-							m.rebuildFeed()
-							return m, nil
-						}
-					}
 				}
 			}
 		}
@@ -381,14 +351,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			if index := m.runningToolIndex(progressEvent{Tool: "local_shell"}); index >= 0 {
 				m.entries[index].toolStatus = "failed"
+				m.entries[index].content = formatToolSummary(m.entries[index].tool, m.entries[index].toolStatus, m.entries[index].arguments)
 				m.entries[index].details = msg.Err.Error()
-				m.entries[index].expanded = true
+				m.entries[index].detailOffset = 0
 				m.entries[index].dirty = true
 				m.liveEntry = -1
 				m.noteOutput()
 				m.rebuildFeed()
 			} else {
-				m.appendEntry(entryError, "Local shell failed: "+msg.Err.Error())
+				entry := newLocalShellEntry(msg.Command)
+				entry.toolStatus = "failed"
+				entry.content = formatToolSummary(entry.tool, entry.toolStatus, entry.arguments)
+				entry.details = msg.Err.Error()
+				m.entries = append(m.entries, entry)
 			}
 			return m, m.restoreComposerAfterWork()
 		}
@@ -413,14 +388,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		details += fmt.Sprintf("exit %d", msg.Output.ExitCode)
 		if index := m.runningToolIndex(progressEvent{Tool: "local_shell"}); index >= 0 {
 			m.entries[index].toolStatus = status
+			m.entries[index].content = formatToolSummary(m.entries[index].tool, m.entries[index].toolStatus, m.entries[index].arguments)
 			m.entries[index].details = shellToolDetails(details)
-			m.entries[index].expanded = true
+			m.entries[index].detailOffset = 0
 			m.entries[index].dirty = true
 			if m.liveEntry == index {
 				m.liveEntry = -1
 			}
 		} else {
-			m.entries = append(m.entries, transcriptEntry{kind: entryTool, content: "Local shell", tool: "local_shell", toolStatus: status, details: shellToolDetails(details), expanded: true})
+			entry := newLocalShellEntry(msg.Command)
+			entry.toolStatus = status
+			entry.content = formatToolSummary(entry.tool, entry.toolStatus, entry.arguments)
+			entry.details = shellToolDetails(details)
+			m.entries = append(m.entries, entry)
 		}
 		m.noteOutput()
 		m.rebuildFeed()
@@ -537,6 +517,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			m.appendEntry(entryError, "Paste failed: "+msg.Err.Error())
 		}
+		if m.surface == surfaceCredential && m.credential != nil {
+			return m, m.credential.Update(tea.PasteMsg{Content: msg.Text})
+		}
+		if m.surface == surfaceModel && m.modelSelector != nil {
+			updated, cmd := m.modelSelector.Update(tea.PasteMsg{Content: msg.Text})
+			selector := updated.(selectors.ProviderSelector)
+			m.modelSelector = &selector
+			return m, cmd
+		}
+		if m.surface == surfaceProvider && m.providerSelector != nil {
+			updated, cmd := m.providerSelector.Update(tea.PasteMsg{Content: msg.Text})
+			selector := updated.(selectors.ProviderSelector)
+			m.providerSelector = &selector
+			return m, cmd
+		}
+		if m.surface != surfaceNone {
+			return m, nil
+		}
 		return m, tea.Batch(m.insertPastedText(msg.Text), m.updatePalette(), m.updateMentionMenu())
 	case plan.PlanDecisionCompletedMsg:
 		answers, _ := json.Marshal(answersFromMap(msg.Answers))
@@ -643,6 +641,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.entries[msg.index].details = "Could not load retained evidence: " + msg.err.Error()
 			m.entries[msg.index].expanded = true
+			m.entries[msg.index].dirty = true
 			if batchID := m.entries[msg.index].toolBatchID; batchID != "" {
 				m.collapsedToolBatches[batchID] = false
 			}
@@ -653,6 +652,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.entries[msg.index].details = evidenceTextForTool(m.entries[msg.index].tool, msg.artifact)
 		m.entries[msg.index].expanded = true
 		m.entries[msg.index].detailOffset = 0
+		m.entries[msg.index].dirty = true
 		if batchID := m.entries[msg.index].toolBatchID; batchID != "" {
 			m.collapsedToolBatches[batchID] = false
 		}
@@ -682,7 +682,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			endpoint := msg.endpoint
 			request.Endpoint = &endpoint
 		}
-		return m, tea.Batch(configureProviderCmd(m.ctx, m.client, request, true), m.spinner.Tick)
+		if msg.model != "" {
+			model := msg.model
+			request.Model = &model
+		}
+		return m, tea.Batch(configureProviderCmd(m.ctx, m.client, request, msg.openModels), m.spinner.Tick)
 	case credentialCancelledMsg:
 		if m.credential != nil {
 			m.credential.clear()
@@ -695,7 +699,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			if m.credential != nil && m.surface == surfaceCredential {
 				m.credential.loading, m.credential.err = false, msg.err.Error()
-				return m, m.credential.key.Focus()
+				return m, m.credential.focus()
 			}
 			m.surface, m.providerSelector, m.modelSelector = surfaceNone, nil, nil
 			m.appendEntry(entryError, "Provider configuration failed: "+msg.err.Error())
@@ -720,8 +724,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return m.updateKey(msg)
 	case tea.PasteMsg:
+		if m.surface == surfaceCredential && m.credential != nil {
+			return m, m.credential.Update(msg)
+		}
+		if m.surface == surfaceModel && m.modelSelector != nil {
+			updated, cmd := m.modelSelector.Update(msg)
+			selector := updated.(selectors.ProviderSelector)
+			m.modelSelector = &selector
+			return m, cmd
+		}
+		if m.surface == surfaceProvider && m.providerSelector != nil {
+			updated, cmd := m.providerSelector.Update(msg)
+			selector := updated.(selectors.ProviderSelector)
+			m.providerSelector = &selector
+			return m, cmd
+		}
+		if m.surface != surfaceNone {
+			return m, nil
+		}
 		return m, tea.Batch(m.insertPastedText(msg.Content), m.updatePalette(), m.updateMentionMenu())
 	case selectors.ProviderSelectedMsg:
+		if msg.ID == customProviderID {
+			return m, m.openCustomCredential()
+		}
 		provider, ok := m.providerChoice(msg.ID)
 		if !ok {
 			m.providerSelector, m.surface = nil, surfaceNone
@@ -759,6 +784,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		updated, cmd := m.palette.Update(msg)
 		m.palette = updated.(selectors.CommandMenu)
 		return m, cmd
+	}
+
+	if m.surface != surfaceNone {
+		return m, nil
 	}
 
 	if m.transcriptFocused() {
@@ -840,40 +869,6 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		newMode := !m.session.PlanModeActive()
 		return m, setPlanModeCmd(m.ctx, m.client, m.session, newMode)
 	}
-	if msg.String() == "ctrl+b" {
-		m.activityToggled = true
-		if m.width < 120 {
-			if m.surface == surfaceActivity {
-				m.showActivity = false
-				m.surface = surfaceNone
-				m.focus = focusComposer
-				m.layout()
-				return m, m.input.Focus()
-			}
-			m.showActivity = true
-			m.surface = surfaceActivity
-			m.priorFocus, m.focus = m.focus, focusActivity
-			m.input.Blur()
-		} else {
-			m.showActivity = !m.showActivity
-		}
-		m.layout()
-		return m, nil
-	}
-	if m.focus == focusActivity {
-		if msg.String() == "esc" || msg.Code == tea.KeyEsc {
-			m.showActivity = false
-			m.surface = surfaceNone
-			m.focus = m.priorFocus
-			if m.focus != focusTranscript {
-				m.focus = focusComposer
-				m.layout()
-				return m, m.input.Focus()
-			}
-			m.layout()
-		}
-		return m, nil
-	}
 	if key.Matches(msg, m.keys.Composer.ToggleMode) {
 		return m.cycleApprovalMode()
 	}
@@ -924,13 +919,18 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if index := m.latestDetailIndex(); index >= 0 && m.entries[index].kind == entryDiff {
 				return m, m.openDiffInspector(index)
 			}
-			if m.toggleLatestTool() {
-				return m, nil
+			if opened, cmd := m.openLatestToolDetails(); opened {
+				return m, cmd
+			}
+		}
+		if key.Matches(msg, m.keys.Feed.Expand) {
+			if opened, cmd := m.openLatestToolDetails(); opened {
+				return m, cmd
 			}
 		}
 		if key.Matches(msg, m.keys.Feed.Evidence) {
-			if index := m.latestArtifactIndex(); index >= 0 {
-				return m, loadArtifactCmd(m.ctx, m.client, m.session.ID, index, m.entries[index].artifactID)
+			if opened, cmd := m.openLatestToolDetails(); opened {
+				return m, cmd
 			}
 			return m, nil
 		}
@@ -1004,6 +1004,11 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.paletteOpen && key.Matches(msg, m.keys.Composer.Submit) && !m.exactCommandInput() {
 		return m.completeSelectedCommand()
+	}
+	if key.Matches(msg, m.keys.Feed.Expand) && strings.TrimSpace(m.input.Value()) == "" {
+		if opened, cmd := m.openLatestToolDetails(); opened {
+			return m, cmd
+		}
 	}
 	if isNewlineKey(msg, m.keys, m.input) {
 		m.input.InsertString("\n")
@@ -1366,7 +1371,7 @@ func (m Model) submitInput() (tea.Model, tea.Cmd) {
 	if input == "/krypton" {
 		return m, m.openKryptonOverlay()
 	}
-	if input == "/provider" || input == "/providers" {
+	if input == "/provider" {
 		m.resetComposer()
 		m.openProviderSelector()
 		return m, nil
@@ -1374,6 +1379,10 @@ func (m Model) submitInput() (tea.Model, tea.Cmd) {
 	if commandIs(input, "/provider") {
 		parts := strings.Fields(input)
 		if len(parts) >= 2 {
+			if strings.EqualFold(parts[1], customProviderID) {
+				m.resetComposer()
+				return m, m.openCustomCredential()
+			}
 			if provider, ok := m.providerChoice(parts[1]); ok && !provider.Configured {
 				if len(parts) >= 3 {
 					provider.Endpoint = parts[2]
@@ -1771,20 +1780,53 @@ func shellToolDetails(output string) string {
 	return truncate(safeText(components.Pretty(output)), 12_000)
 }
 
-func (m *Model) toggleLatestTool() bool {
+func (m *Model) openToolDetails(index int) tea.Cmd {
+	if index < 0 || index >= len(m.entries) {
+		return nil
+	}
+	entry := &m.entries[index]
+	runningCommand := toolFamilyFor(entry.tool) == toolCommand && strings.EqualFold(entry.toolStatus, "running")
+	if entry.kind != entryTool || !toolHasDetails(*entry, runningCommand) {
+		return nil
+	}
+	if entry.artifactID != "" && strings.TrimSpace(entry.details) == "" {
+		return loadArtifactCmd(m.ctx, m.client, m.session.ID, index, entry.artifactID)
+	}
+	entry.expanded = !entry.expanded
+	entry.detailOffset = 0
+	entry.dirty = true
+	m.invalidateFeedPrefix()
+	m.rebuildFeed()
+	return nil
+}
+
+func (m *Model) openLatestToolDetails() (bool, tea.Cmd) {
 	for index := len(m.entries) - 1; index >= 0; index-- {
-		entry := &m.entries[index]
-		if entry.kind == entryTool && (entry.details != "" || toolFamilyFor(entry.tool) == toolCommand && entry.toolStatus == "running") {
+		entry := m.entries[index]
+		runningCommand := toolFamilyFor(entry.tool) == toolCommand && strings.EqualFold(entry.toolStatus, "running")
+		if entry.kind == entryTool && toolHasDetails(entry, runningCommand) {
 			if indices := m.toolBatchIndices(entry.toolBatchID); len(indices) > 1 && m.collapsedToolBatches[entry.toolBatchID] {
 				m.collapsedToolBatches[entry.toolBatchID] = false
 				m.invalidateFeedPrefix()
 				m.rebuildFeed()
-				return true
+				return true, nil
 			}
-			entry.expanded = !entry.expanded
-			entry.detailOffset = 0
-			m.invalidateFeedPrefix()
-			m.rebuildFeed()
+			return true, m.openToolDetails(index)
+		}
+	}
+	return false, nil
+}
+
+func (m *Model) toggleLatestTool() bool {
+	opened, _ := m.openLatestToolDetails()
+	return opened
+}
+
+func (m Model) hasLatestToolDetails() bool {
+	for index := len(m.entries) - 1; index >= 0; index-- {
+		entry := m.entries[index]
+		runningCommand := toolFamilyFor(entry.tool) == toolCommand && strings.EqualFold(entry.toolStatus, "running")
+		if entry.kind == entryTool && toolHasDetails(entry, runningCommand) {
 			return true
 		}
 	}
@@ -2101,7 +2143,7 @@ func conciseCommandOutput(input, output string) string {
 	case commandIs(input, "/tools"):
 		return "Tool catalog ready — approvals follow the selected mode."
 	case commandIs(input, "/activity"):
-		return "Recent activity is available with Ctrl+B."
+		return output
 	case commandIs(input, "/doctor"):
 		return "Setup check complete."
 	case commandIs(input, "/config"):

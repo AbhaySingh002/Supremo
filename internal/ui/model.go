@@ -132,7 +132,6 @@ const (
 	surfaceApproval
 	surfaceDiff
 	surfaceHelp
-	surfaceActivity
 )
 
 type focusTarget int
@@ -140,7 +139,6 @@ type focusTarget int
 const (
 	focusComposer focusTarget = iota
 	focusTranscript
-	focusActivity
 	focusOverlay
 )
 
@@ -200,7 +198,7 @@ type chatModel struct {
 	historyPrefix        string
 	historyPrefixCount   int
 	historyPrefixWidth   int
-	streamBuffer         strings.Builder
+	streamBuffer         string
 	streamTicking        bool
 	streamLastTick       time.Time
 	planDraft            bool
@@ -209,13 +207,10 @@ type chatModel struct {
 
 // activityModel owns the derived run, tool, checklist, and subagent rail.
 type activityModel struct {
-	phase           string
-	activity        []activityEvent
-	agents          []api.Agent
-	runs            []api.Run
-	todos           []api.TodoItem
-	showActivity    bool
-	activityToggled bool
+	phase    string
+	activity []activityEvent
+	agents   []api.Agent
+	todos    []api.TodoItem
 }
 
 // surfaceState routes the single active overlay and restores its prior focus.
@@ -265,14 +260,15 @@ type Model struct {
 	catalogBusy  bool
 	catalogNote  string
 
-	session         api.Session
-	provider        string
-	modelName       string
-	credentialReady bool
-	inputTokens     int
-	outputTokens    int
-	contextLimit    int
-	debug           bool
+	session          api.Session
+	provider         string
+	modelName        string
+	providerEndpoint string
+	credentialReady  bool
+	inputTokens      int
+	outputTokens     int
+	contextLimit     int
+	debug            bool
 
 	width          int
 	height         int
@@ -299,9 +295,12 @@ func (m *Model) openProviderSelector() {
 	m.priorFocus, m.focus = m.focus, focusOverlay
 	m.input.Blur()
 	choices := []selectors.Provider{}
-	activeType := strings.SplitN(m.provider, ":", 2)[0]
-	for _, provider := range m.providers {
-		choices = append(choices, selectors.Provider{ID: provider.ID, Name: provider.Name, Description: map[bool]string{true: "configured", false: "needs setup"}[provider.Configured], Active: activeType == provider.ID})
+	for _, provider := range m.providerOptions() {
+		description := map[bool]string{true: "configured", false: "needs setup"}[provider.Configured]
+		if provider.ID == customProviderID {
+			description = "name, endpoint, API key, and model"
+		}
+		choices = append(choices, selectors.Provider{ID: provider.ID, Name: provider.Name, Description: description, Active: provider.ID == m.provider})
 	}
 	selector := selectors.NewProviderSelector(choices, theme.Default())
 	width, height := m.selectorSize()
@@ -311,7 +310,7 @@ func (m *Model) openProviderSelector() {
 }
 
 func (m Model) providerChoice(id string) (api.Provider, bool) {
-	for _, provider := range m.providers {
+	for _, provider := range m.providerOptions() {
 		if provider.ID == id {
 			return provider, true
 		}
@@ -321,10 +320,36 @@ func (m Model) providerChoice(id string) (api.Provider, bool) {
 		if provider.ID == base {
 			provider.ID = id
 			provider.Configured = m.credentialReady && id == m.provider
+			if id == m.provider {
+				provider.Endpoint = m.providerEndpoint
+			}
 			return provider, true
 		}
 	}
 	return api.Provider{}, false
+}
+
+func (m Model) providerOptions() []api.Provider {
+	options := append([]api.Provider(nil), m.providers...)
+	if strings.HasPrefix(m.provider, "openai-compatible:") {
+		found := false
+		for _, provider := range options {
+			if provider.ID == m.provider {
+				found = true
+				break
+			}
+		}
+		if !found {
+			name := strings.TrimPrefix(m.provider, "openai-compatible:")
+			options = append(options, api.Provider{ID: m.provider, Name: name + " (Custom)", Configured: true, Endpoint: m.providerEndpoint, RequiresEndpoint: true})
+		}
+	}
+	for _, provider := range options {
+		if provider.ID == customProviderID {
+			return options
+		}
+	}
+	return append(options, api.Provider{ID: customProviderID, Name: "Custom OpenAI-compatible", RequiresEndpoint: true})
 }
 
 func (m *Model) openCredential(provider api.Provider) tea.Cmd {
@@ -335,10 +360,18 @@ func (m *Model) openCredential(provider api.Provider) tea.Cmd {
 	m.input.Blur()
 	m.credential = newCredentialSetup(provider, m.styles)
 	m.layout()
-	if m.credential.step == credentialEndpoint {
-		return m.credential.endpoint.Focus()
-	}
-	return m.credential.key.Focus()
+	return m.credential.focus()
+}
+
+func (m *Model) openCustomCredential() tea.Cmd {
+	m.paletteOpen = false
+	m.providerSelector, m.modelSelector = nil, nil
+	m.priorFocus, m.focus = m.focus, focusOverlay
+	m.surface = surfaceCredential
+	m.input.Blur()
+	m.credential = newCustomCredentialSetup(m.styles)
+	m.layout()
+	return m.credential.focus()
 }
 
 func (m *Model) refreshModelCatalog() tea.Cmd {
@@ -360,20 +393,58 @@ func (m *Model) openModelSelector() bool {
 		if provider.MetadataWarning != "" {
 			warnings++
 		}
-		for _, model := range models {
-			description := provider.MetadataState
-			if model.ContextLength > 0 {
-				description += fmt.Sprintf(" · %dk context", model.ContextLength/1000)
+		pName := provider.Name
+		if pName == "" {
+			switch strings.ToLower(provider.ID) {
+			case "gemini":
+				pName = "Google Gemini"
+			case "openai":
+				pName = "OpenAI"
+			case "anthropic":
+				pName = "Anthropic"
+			case "opencode-zen", "opencode":
+				pName = "OpenCode Zen"
+			case "openrouter":
+				pName = "OpenRouter"
+			case "mistral":
+				pName = "Mistral"
+			case "groq":
+				pName = "Groq"
+			case "ollama":
+				pName = "Ollama"
+			case "github-models", "github":
+				pName = "GitHub Models"
+			default:
+				if len(provider.ID) > 0 {
+					pName = strings.ToUpper(provider.ID[:1]) + provider.ID[1:]
+				} else {
+					pName = "Models"
+				}
 			}
-			if model.Name != "" && model.Name != model.ID {
-				description += " · " + model.Name
+		}
+		for _, model := range models {
+			displayName := model.Name
+			if displayName == "" {
+				displayName = model.ID
+			}
+			tag := ""
+			if model.ContextLength > 0 {
+				tag = fmt.Sprintf("%dk", model.ContextLength/1000)
 			}
 			if provider.MetadataWarning != "" {
-				description += " · refresh failed; cached"
+				if tag != "" {
+					tag += " · cached"
+				} else {
+					tag = "cached"
+				}
 			}
 			options = append(options, selectors.Provider{
-				ID: model.ID, ProviderID: provider.ID, Name: provider.Name + "  ·  " + model.ID, Description: description,
-				Active: provider.ID == m.provider && model.ID == m.modelName,
+				ID:           model.ID,
+				ProviderID:   provider.ID,
+				ProviderName: pName,
+				Name:         displayName,
+				Description:  tag,
+				Active:       provider.ID == m.provider && model.ID == m.modelName,
 			})
 		}
 	}
@@ -587,7 +658,12 @@ func (m *Model) layout() {
 	paletteHeight, mentionHeight := 0, 0
 	paletteFrame := m.styles.Palette.GetVerticalFrameSize()
 	if m.paletteOpen && m.surface == surfaceNone {
-		paletteHeight = min(10, max(4, m.height/3))
+		itemCount := len(m.palette.Items())
+		if itemCount == 0 {
+			itemCount = 1
+		}
+		neededHeight := itemCount * 2
+		paletteHeight = min(neededHeight, min(10, max(2, m.height/3)))
 		m.palette.SetSize(max(20, min(72, m.width-4)), max(1, paletteHeight-paletteFrame))
 	}
 	if m.mentionOpen && m.surface == surfaceNone {
@@ -896,7 +972,7 @@ func (m Model) transcriptFocused() bool { return m.focus == focusTranscript }
 
 func (m *Model) restoreFocus() tea.Cmd {
 	target := m.priorFocus
-	if target == focusOverlay || target == focusActivity {
+	if target == focusOverlay {
 		target = focusComposer
 	}
 	m.focus = target
@@ -909,7 +985,7 @@ func (m *Model) restoreFocus() tea.Cmd {
 }
 
 func (m *Model) restoreComposerAfterWork() tea.Cmd {
-	if m.surface != surfaceNone || m.active != nil || m.focus == focusTranscript || m.focus == focusActivity {
+	if m.surface != surfaceNone || m.active != nil || m.focus == focusTranscript {
 		return nil
 	}
 	m.focus = focusComposer
@@ -1179,9 +1255,9 @@ func visibleToolDetails(details string, offset int) (preview string, start, end,
 
 func (m *Model) appendStreamingChunk(content string) tea.Cmd {
 	m.clearLiveStatus()
-	m.streamBuffer.WriteString(content)
+	m.streamBuffer += content
 	now := time.Now()
-	if m.streamLastTick.IsZero() || now.Sub(m.streamLastTick) >= 25*time.Millisecond || m.streamBuffer.Len() > 4096 {
+	if m.streamLastTick.IsZero() || now.Sub(m.streamLastTick) >= 25*time.Millisecond || len(m.streamBuffer) > 4096 {
 		m.flushStreaming()
 		return nil
 	}
@@ -1193,11 +1269,11 @@ func (m *Model) appendStreamingChunk(content string) tea.Cmd {
 }
 
 func (m *Model) flushStreaming() {
-	if m.streamBuffer.Len() == 0 {
+	if len(m.streamBuffer) == 0 {
 		return
 	}
-	chunk := m.streamBuffer.String()
-	m.streamBuffer.Reset()
+	chunk := m.streamBuffer
+	m.streamBuffer = ""
 	m.streamTicking = false
 	m.streamLastTick = time.Now()
 

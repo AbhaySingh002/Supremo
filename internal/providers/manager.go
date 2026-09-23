@@ -72,6 +72,26 @@ func providerType(providerName string) string {
 	return strings.SplitN(providerName, ":", 2)[0]
 }
 
+func anonymousOpenAICompatibleRoute(providerName string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(providerName)), "openai-compatible:")
+}
+
+func validateCustomProviderRoute(providerName string) error {
+	if !anonymousOpenAICompatibleRoute(providerName) {
+		return nil
+	}
+	route := strings.SplitN(strings.TrimSpace(providerName), ":", 2)[1]
+	if route == "" || len(route) > 48 {
+		return fmt.Errorf("custom OpenAI-compatible provider name must be 1 to 48 characters")
+	}
+	for _, r := range route {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
+			return fmt.Errorf("custom OpenAI-compatible provider name contains an invalid character")
+		}
+	}
+	return nil
+}
+
 func (m *Manager) createClient(ctx context.Context, providerName, apiKey, model, endpoint string) (Provider, error) {
 	if m == nil || m.registry == nil {
 		return nil, fmt.Errorf("provider registry is not initialized")
@@ -332,6 +352,9 @@ func (m *Manager) Configure(ctx context.Context, update ConfigurationUpdate) err
 	providerName, model, endpoint, apiKey := runtime.providerName, runtime.model, runtime.endpoint, runtime.apiKey
 	if update.Provider != nil {
 		providerName = strings.TrimSpace(*update.Provider)
+		if err := validateCustomProviderRoute(providerName); err != nil {
+			return err
+		}
 		registration, err := m.providerRegistration(providerName)
 		if err != nil {
 			return err
@@ -360,7 +383,7 @@ func (m *Manager) Configure(ctx context.Context, update ConfigurationUpdate) err
 	if err := validateProviderEndpoint(registration, endpoint); err != nil {
 		return err
 	}
-	if update.Verify && !credentialConfigured(apiKey) {
+	if update.Verify && !credentialConfigured(apiKey) && !anonymousOpenAICompatibleRoute(providerName) {
 		return fmt.Errorf("API key is required for %s", providerName)
 	}
 	client, err := m.createClient(ctx, providerName, apiKey, model, endpoint)
@@ -464,7 +487,7 @@ func (m *Manager) ModelCatalog(ctx context.Context, refresh bool) ([]CatalogProv
 		if err != nil {
 			return nil, err
 		}
-		if !credentialConfigured(key) {
+		if !credentialConfigured(key) && !anonymousOpenAICompatibleRoute(name) {
 			continue
 		}
 		endpoint := configuredEndpoint(&config, name, registration.DefaultEndpoint)

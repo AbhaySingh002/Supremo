@@ -193,7 +193,7 @@ func decodeEvent[T any](event api.Event) (T, error) {
 
 func (m *Model) applyInitialize(value api.InitializeResult) {
 	m.workspace = value.Workspace
-	m.provider, m.modelName, m.credentialReady = value.Provider, value.Model, value.CredentialReady
+	m.provider, m.modelName, m.providerEndpoint, m.credentialReady = value.Provider, value.Model, value.Endpoint, value.CredentialReady
 	m.providers = append([]api.Provider(nil), value.Providers...)
 	if m.provider == "" {
 		m.provider = "unconfigured"
@@ -201,6 +201,7 @@ func (m *Model) applyInitialize(value api.InitializeResult) {
 }
 
 func (m *Model) applySnapshot(snapshot api.SessionSnapshot) {
+	wasContextual := m.contextualActivityVisible()
 	pendingActivity := append([]activityEvent(nil), m.activity...)
 	m.session = snapshot.Session
 	m.cursor = max(m.cursor, snapshot.AsOfCursor)
@@ -211,7 +212,6 @@ func (m *Model) applySnapshot(snapshot api.SessionSnapshot) {
 		m.setTodos(m.todos)
 	}
 	m.agents = append([]api.Agent(nil), snapshot.Agents...)
-	m.runs = append([]api.Run(nil), snapshot.Runs...)
 	m.activity = activityFromMessages(snapshot.Messages)
 	completed := make(map[string]bool, len(m.activity))
 	for _, item := range m.activity {
@@ -258,6 +258,10 @@ func (m *Model) applySnapshot(snapshot api.SessionSnapshot) {
 	}
 	if len(snapshot.PendingInteractions) > 0 {
 		m.openInteraction(snapshot.PendingInteractions[0])
+	}
+	if wasContextual != m.contextualActivityVisible() {
+		m.layout()
+		return
 	}
 	m.rebuildFeed()
 }
@@ -323,7 +327,11 @@ func (m *Model) applyAPIEvent(event api.Event) tea.Cmd {
 	case api.EventPlanMode:
 		var payload api.PlanModeUpdate
 		if json.Unmarshal(event.Data, &payload) == nil {
+			wasContextual := m.contextualActivityVisible()
 			m.session.PlanMode = payload.Active
+			if wasContextual != m.contextualActivityVisible() {
+				m.layout()
+			}
 		}
 	case api.EventUsage:
 		var payload api.UsageDetail

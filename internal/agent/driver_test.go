@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -16,6 +19,7 @@ import (
 	"github.com/AbhaySingh002/supremo/internal/sessionlog"
 	"github.com/AbhaySingh002/supremo/internal/state"
 	"github.com/AbhaySingh002/supremo/internal/tools"
+	"github.com/AbhaySingh002/supremo/internal/tools/terminal"
 )
 
 type driverLifecycle struct {
@@ -473,6 +477,36 @@ func TestDriverRecoverableToolFailureContinues(t *testing.T) {
 	text, err := worker.Run(context.Background(), session, "x")
 	if err != nil || text != "repaired" {
 		t.Fatalf("text=%q err=%v", text, err)
+	}
+}
+
+func TestDriverContinuesAfterCheckpointRejectsOutsideCommandDirectory(t *testing.T) {
+	life := &driverLifecycle{activeTools: []string{"execute_command"}}
+	provider := &scriptedProvider{chat: func(_ context.Context, n int, prompt *models.Prompt) (*providers.Completion, error) {
+		if n == 0 {
+			return &providers.Completion{ToolCalls: []models.ToolCall{{ID: "outside-dir", Name: "execute_command", Arguments: json.RawMessage(`{"command":"sh","args":["-c","touch command-ran"],"directory":"/"}`)}}}, nil
+		}
+		if n == 1 {
+			if len(prompt.Messages) == 0 || prompt.Messages[len(prompt.Messages)-1].Role != models.RoleTool {
+				t.Fatalf("second provider call did not receive tool result: %#v", prompt.Messages)
+			}
+			if !strings.Contains(prompt.Messages[len(prompt.Messages)-1].Content, tools.ErrorClassToolArgument) {
+				t.Fatalf("outside directory was not reported as a tool argument error: %s", prompt.Messages[len(prompt.Messages)-1].Content)
+			}
+			return &providers.Completion{Text: "recovered"}, nil
+		}
+		t.Fatalf("unexpected provider call %d", n)
+		return nil, nil
+	}}
+	worker, session := driverAgent(t, provider, &terminal.ExecuteCommand{}, life)
+	session.ApprovalMode = tools.ApprovalSuperman
+
+	text, err := worker.Run(context.Background(), session, "list files")
+	if err != nil || text != "recovered" || provider.calls != 2 {
+		t.Fatalf("text=%q calls=%d err=%v", text, provider.calls, err)
+	}
+	if _, err := os.Stat(filepath.Join(worker.workspace, "command-ran")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("command ran despite outside directory rejection: %v", err)
 	}
 }
 

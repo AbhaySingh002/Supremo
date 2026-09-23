@@ -357,18 +357,110 @@ func TestInkSignalChatHierarchyAndToolDrawers(t *testing.T) {
 		t.Fatal("nested failed result was projected as successful")
 	}
 	entry := transcriptEntry{
-		kind: entryTool, tool: "execute_command", toolStatus: "completed", content: "go test ./...",
+		kind: entryTool, tool: "execute_command", toolStatus: "completed", content: "Ran command",
 		arguments: `{"command":"go","args":["test","./..."]}`, details: commandOutput, expanded: true,
 	}
 	drawer := ansi.Strip(zone.Scan(model.RenderToolEntry(0, entry, false)))
-	if !strings.Contains(drawer, "$ go test ./...") || !strings.Contains(drawer, "ok") || !strings.Contains(drawer, "exit 0") || strings.Contains(drawer, `"stdout"`) {
+	if !strings.Contains(drawer, "Ran command") || !strings.Contains(drawer, "$ go test ./...") || !strings.Contains(drawer, "ok") || !strings.Contains(drawer, "exit 0") || strings.Contains(drawer, `"stdout"`) || strings.Count(drawer, "go test ./...") != 1 {
 		t.Fatalf("command drawer = %q", drawer)
+	}
+	entry.expanded = false
+	collapsed := ansi.Strip(zone.Scan(model.RenderToolEntry(0, entry, false)))
+	if !strings.Contains(collapsed, "Ran command") || !strings.Contains(collapsed, "\n└ $ go test ./...") || !strings.Contains(collapsed, "Ctrl+O") || strings.Contains(collapsed, "details") || strings.Count(collapsed, "go test ./...") != 1 || strings.Contains(collapsed, `"stdout"`) {
+		t.Fatalf("collapsed command row = %q", collapsed)
+	}
+	directoryEntry := transcriptEntry{
+		kind: entryTool, tool: "list_directory", toolStatus: "completed", content: "Listed /tmp",
+		arguments: `{"path":"/tmp"}`, details: directory, expanded: false,
+	}
+	directoryRow := ansi.Strip(zone.Scan(model.RenderToolEntry(1, directoryEntry, false)))
+	if !strings.Contains(directoryRow, "ls -a -- /tmp") || strings.Contains(directoryRow, "list directory") {
+		t.Fatalf("directory row = %q", directoryRow)
+	}
+	directoryEntry.expanded = true
+	directoryDrawer := ansi.Strip(zone.Scan(model.RenderToolEntry(1, directoryEntry, false)))
+	if !strings.Contains(directoryDrawer, "$ ls -a -- /tmp") || !strings.Contains(directoryDrawer, "main.go") || !strings.Contains(directoryDrawer, "╭") || !strings.Contains(directoryDrawer, "╯") {
+		t.Fatalf("directory drawer = %q", directoryDrawer)
 	}
 
 	long := strings.Join([]string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"}, "\n")
 	preview, start, end, total := visibleToolDetails(long, 1)
-	if strings.Count(preview, "\n")+1 != maxVisibleToolLines || start != 1 || end != 11 || total != 12 {
+	if strings.Count(preview, "\n")+1 != maxVisibleToolLines || start != 1 || end != 9 || total != 12 {
 		t.Fatalf("bounded details = (%q, %d, %d, %d)", preview, start, end, total)
+	}
+}
+
+func TestSearchToolRowsUseSemanticInlineProgress(t *testing.T) {
+	model := New(nil, ".", "search-row", Options{})
+	model.width, model.height = 100, 28
+	model.layout()
+
+	for _, test := range []struct {
+		name      string
+		tool      string
+		running   string
+		completed string
+		arguments string
+		output    string
+		match     string
+	}{
+		{
+			name:      "glob",
+			tool:      "glob",
+			running:   "Finding",
+			completed: "Found",
+			arguments: `{"path":"/workspace","pattern":"*.go"}`,
+			output:    `{"matches":[{"path":"internal/main.go","name":"main.go","type":"file"}]}`,
+			match:     "internal/main.go",
+		},
+		{
+			name:      "grep",
+			tool:      "grep",
+			running:   "Searching",
+			completed: "Searched",
+			arguments: `{"path":"/workspace","pattern":"needle"}`,
+			output:    `{"matches":[{"file":"main.go","line":3,"content":"needle"}]}`,
+			match:     "main.go:3  needle",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			running := transcriptEntry{
+				kind:       entryTool,
+				tool:       test.tool,
+				toolStatus: "running",
+				content:    formatToolSummary(test.tool, "running", test.arguments),
+				arguments:  test.arguments,
+			}
+			renderedRunning := ansi.Strip(zone.Scan(model.RenderToolEntry(0, running, true)))
+			if !strings.Contains(renderedRunning, test.running) || strings.Contains(renderedRunning, "path=") || strings.Contains(renderedRunning, "pattern=") || strings.Contains(renderedRunning, "running") {
+				t.Fatalf("running row = %q", renderedRunning)
+			}
+			if spinner := ansi.Strip(model.spinner.View()); spinner == "" || !strings.Contains(renderedRunning, spinner) {
+				t.Fatalf("running row did not render the spinner: %q", renderedRunning)
+			}
+
+			details := toolResultDetails(test.tool, test.output)
+			if !strings.Contains(details, test.match) {
+				t.Fatalf("formatted %s details = %q", test.tool, details)
+			}
+			completed := transcriptEntry{
+				kind:       entryTool,
+				tool:       test.tool,
+				toolStatus: "completed",
+				content:    formatToolSummary(test.tool, "completed", test.arguments),
+				arguments:  test.arguments,
+				details:    details,
+			}
+			renderedCompleted := ansi.Strip(zone.Scan(model.RenderToolEntry(0, completed, false)))
+			if !strings.Contains(renderedCompleted, test.completed) || !strings.Contains(renderedCompleted, "Ctrl+O") || strings.Contains(renderedCompleted, "path=") || strings.Contains(renderedCompleted, "pattern=") {
+				t.Fatalf("completed row = %q", renderedCompleted)
+			}
+			completed.expanded = true
+			drawer := ansi.Strip(zone.Scan(model.RenderToolEntry(0, completed, false)))
+			if !strings.Contains(drawer, test.match) {
+				t.Fatalf("expanded %s drawer = %q", test.tool, drawer)
+			}
+		})
 	}
 }
 
@@ -386,7 +478,7 @@ func TestToolBatchGroupsInModelOrderAndCollapsesForNextTurn(t *testing.T) {
 		t.Fatalf("batch indices = %v", indices)
 	}
 	open := ansi.Strip(zone.Scan(model.feed.View()))
-	readIndex, commandIndex := strings.Index(open, "Read main.go"), strings.Index(open, "Ran go test ./...")
+	readIndex, commandIndex := strings.Index(open, "read file  path=main.go"), strings.Index(open, "go test ./...")
 	if !strings.Contains(open, "Read 1 file, ran 1 command") || readIndex < 0 || commandIndex < 0 || readIndex > commandIndex || strings.Contains(open, "package main") || strings.Contains(open, "\nok\n") {
 		t.Fatalf("open batch = %q", open)
 	}
@@ -394,7 +486,7 @@ func TestToolBatchGroupsInModelOrderAndCollapsesForNextTurn(t *testing.T) {
 	model.collapseCompletedToolBatches()
 	model.rebuildFeed()
 	collapsed := ansi.Strip(zone.Scan(model.feed.View()))
-	if !strings.Contains(collapsed, "Read 1 file, ran 1 command") || strings.Contains(collapsed, "Read main.go") || strings.Contains(collapsed, "Ran go test ./...") {
+	if !strings.Contains(collapsed, "Read 1 file, ran 1 command") || strings.Contains(collapsed, "read file  path=main.go") || strings.Contains(collapsed, "go test ./...") {
 		t.Fatalf("collapsed batch = %q", collapsed)
 	}
 	if !model.toggleLatestToolBatch() || model.collapsedToolBatches["1:2"] {

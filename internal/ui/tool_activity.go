@@ -13,7 +13,7 @@ import (
 	"github.com/AbhaySingh002/supremo/internal/ui/components"
 )
 
-const maxVisibleToolLines = 10
+const maxVisibleToolLines = 8
 
 type toolFamily int
 
@@ -40,7 +40,7 @@ func toolFamilyFor(tool string) toolFamily {
 		return toolRead
 	case "write_file", "replace_in_file":
 		return toolWrite
-	case "search_file_name", "search_text", "find_symbol", "find_references", "repository_query":
+	case "glob", "grep", "search_file_name", "search_text", "find_symbol", "find_references", "repository_query":
 		return toolSearch
 	case "list_directory":
 		return toolList
@@ -106,6 +106,16 @@ func formatToolSummary(tool, status, arguments string) string {
 		return withTarget("Created folder", path)
 	case "list_directory":
 		return withTarget("Listed", path)
+	case "glob":
+		if strings.EqualFold(status, "completed") {
+			return "Found"
+		}
+		return "Finding"
+	case "grep":
+		if strings.EqualFold(status, "completed") {
+			return "Searched"
+		}
+		return "Searching"
 	case "search_file_name":
 		return withTarget("Found files", quotedToolTarget(firstToolArg(arguments, "pattern", "query")))
 	case "search_text":
@@ -123,11 +133,10 @@ func formatToolSummary(tool, status, arguments string) string {
 	case "git_log":
 		return "Read git log"
 	case "execute_command", "local_shell":
-		cmd := toolArgument(arguments, "command")
-		if args := toolArguments(arguments, "args"); len(args) > 0 {
-			cmd += " " + strings.Join(args, " ")
+		if status == "running" {
+			return "Running command…"
 		}
-		return withTarget("Ran", truncate(strings.TrimSpace(cmd), 60))
+		return "Ran command"
 	case "subagent":
 		return withTarget("Delegated", quotedToolTarget(toolArgument(arguments, "label")))
 	case "list_agents":
@@ -222,7 +231,7 @@ func (m Model) ToolStatusBadge(status string, live bool) string {
 	state := strings.ToLower(status)
 	switch {
 	case live || state == "running":
-		return m.styles.ToolRunning.Render(m.glyph("…", "...") + " running")
+		return m.styles.ToolRunning.Render(m.spinner.View())
 	case state == "completed" || state == "approved":
 		if state == "approved" {
 			return m.styles.ToolSuccess.Render(m.glyph("✓", "OK") + " approved")
@@ -265,15 +274,12 @@ func (m Model) renderToolBatch(indices []int) string {
 	}
 	batchID := m.entries[indices[0]].toolBatchID
 	collapsed := m.collapsedToolBatches[batchID]
-	arrow := m.glyph("▸", ">")
-	if !collapsed {
-		arrow = m.glyph("▾", "v")
-	}
 	icon := m.toolIcon(m.batchIconTool(indices))
 	status := m.ToolStatusBadge(toolBatchStatus(m.entries, indices), false)
-	summaryWidth := max(8, m.contentWidth()-ansi.StringWidth(icon)-ansi.StringWidth(status)-7)
+	hint := m.styles.Muted.Render("Ctrl+O")
+	summaryWidth := max(8, m.contentWidth()-ansi.StringWidth(icon)-ansi.StringWidth(status)-ansi.StringWidth(hint)-7)
 	summary := ansi.Truncate(toolBatchSummary(m.entries, indices), summaryWidth, "…")
-	header := icon + " " + m.styles.Muted.Render(summary) + "  " + status + "  " + m.styles.Muted.Render(arrow)
+	header := icon + " " + m.styles.Muted.Render(summary) + "  " + status + "  " + hint
 	header = zone.Mark(fmt.Sprintf("tool-batch-%d", indices[0]), header)
 	if collapsed {
 		return header
@@ -376,25 +382,35 @@ func (m Model) renderToolEntry(index int, entry transcriptEntry, live, nested bo
 		labelStyle = m.styles.Muted
 	}
 	runningCommand := toolFamilyFor(entry.tool) == toolCommand && (live || strings.EqualFold(entry.toolStatus, "running"))
-	hasDetails := entry.artifactID != "" || entry.details != "" || runningCommand
+	hasDetails := toolHasDetails(entry, runningCommand)
 	reserved := ansi.StringWidth(icon) + ansi.StringWidth(badge) + 5
+	hint := ""
 	if hasDetails {
-		reserved += 3
+		hint = m.styles.Muted.Render("Ctrl+O")
+		reserved += ansi.StringWidth(hint) + 2
 	}
 	if nested {
 		reserved += 2
 	}
-	label := ansi.Truncate(entry.content, max(8, m.contentWidth()-reserved), "…")
+	command := toolFamilyFor(entry.tool) == toolCommand
+	label := ""
+	if command || entry.tool == "glob" || entry.tool == "grep" {
+		label = entry.content
+	} else {
+		label = toolRowInvocation(entry.tool, entry.arguments)
+		if label == "" {
+			label = entry.content
+		}
+	}
+	label = ansi.Truncate(label, max(8, m.contentWidth()-reserved), "…")
 	header := icon + " " + labelStyle.Render(label) + "  " + badge
 	if hasDetails {
-		disclosure := m.glyph("▸", ">")
-		if entry.expanded {
-			disclosure = m.glyph("▾", "v")
-		}
-		if entry.artifactID != "" {
-			header += "  " + zone.Mark(fmt.Sprintf("artifact-%d", index), m.styles.Muted.Render(disclosure))
-		} else {
-			header += "  " + m.styles.Muted.Render(disclosure)
+		header += "  " + hint
+	}
+	if command && !entry.expanded {
+		if invocation := strings.TrimSpace(toolInvocation(entry.tool, entry.arguments)); invocation != "" {
+			branch := m.styles.Muted.Render(m.glyph("└", "\\") + " " + invocation)
+			return zone.Mark(fmt.Sprintf("tool-%d", index), header+"\n"+branch)
 		}
 	}
 	header = zone.Mark(fmt.Sprintf("tool-%d", index), header)
@@ -422,45 +438,21 @@ func (m Model) renderToolEntry(index int, entry transcriptEntry, live, nested bo
 	return components.ToolView(header, "", details, entry.expanded, "", m.glyph)
 }
 
+func toolHasDetails(entry transcriptEntry, runningCommand bool) bool {
+	return entry.artifactID != "" || entry.details != "" || runningCommand
+}
+
 func (m Model) terminalToolDetails(entry transcriptEntry, output, exitCode string) string {
-	title := toolFamilyTitle(toolFamilyFor(entry.tool))
-	lines := []string{m.styles.Muted.Render(title)}
+	lines := make([]string, 0, 3)
 	if invocation := strings.TrimSpace(toolInvocation(entry.tool, entry.arguments)); invocation != "" {
-		invocationStyle := m.styles.Tool
-		switch toolFamilyFor(entry.tool) {
-		case toolCommand:
-			invocationStyle = m.styles.ToolCommand
-		case toolRead, toolList, toolWeb:
-			invocationStyle = m.styles.ToolRead
-		case toolWrite, toolCreate, toolRename:
-			invocationStyle = m.styles.ToolWrite
-		case toolDelete:
-			invocationStyle = m.styles.ToolFailure
-		case toolSearch:
-			invocationStyle = m.styles.ToolSearch
-		case toolGit:
-			invocationStyle = m.styles.ToolGit
-		case toolAgent:
-			invocationStyle = m.styles.ToolAgent
-		}
-		lines = append(lines, "", invocationStyle.Render(invocation))
+		lines = append(lines, m.styles.Muted.Render(invocation))
 	}
 	if strings.TrimSpace(output) != "" {
-		lines = append(lines, "", output)
-	}
-	footer := m.ToolStatusBadge(entry.toolStatus, false)
-	switch strings.ToLower(entry.toolStatus) {
-	case "completed", "approved":
-		footer = m.styles.ToolSuccess.Render(m.glyph("✓", "OK") + " Success")
-	case "failed", "denied":
-		footer = m.styles.ToolFailure.Render(m.glyph("×", "X") + " Failed")
-	case "canceled", "timed out":
-		footer = m.styles.Warning.Render(m.glyph("×", "X") + " " + entry.toolStatus)
+		lines = append(lines, m.styles.Muted.Render(output))
 	}
 	if exitCode != "" {
-		footer += m.styles.Muted.Render(" · exit " + exitCode)
+		lines = append(lines, m.styles.Muted.Render("exit "+exitCode))
 	}
-	lines = append(lines, "", footer)
 	outerWidth := max(20, min(96, m.contentWidth()-6))
 	return m.styles.ToolDrawer.Width(max(1, outerWidth-m.styles.ToolDrawer.GetHorizontalFrameSize())).Render(strings.Join(lines, "\n"))
 }
@@ -470,29 +462,6 @@ func (m Model) wrapToolDetails(details string) string {
 		return ""
 	}
 	return ansi.Hardwrap(details, max(12, min(88, m.contentWidth()-12)), true)
-}
-
-func toolFamilyTitle(family toolFamily) string {
-	switch family {
-	case toolCommand:
-		return "Shell"
-	case toolRead:
-		return "Read"
-	case toolWrite, toolCreate, toolDelete, toolRename:
-		return "Change"
-	case toolSearch:
-		return "Search"
-	case toolList:
-		return "Directory"
-	case toolGit:
-		return "Git"
-	case toolWeb:
-		return "Web"
-	case toolAgent:
-		return "Subagent"
-	default:
-		return "Tool result"
-	}
 }
 
 func splitExitStatus(output string) (string, string) {
@@ -514,7 +483,7 @@ func newLocalShellEntry(command string) transcriptEntry {
 	arguments, _ := json.Marshal(map[string]string{"command": command})
 	return transcriptEntry{
 		kind: entryTool, content: formatToolSummary("local_shell", "running", string(arguments)), tool: "local_shell", toolStatus: "running",
-		arguments: string(arguments), dirty: true, expanded: true,
+		arguments: string(arguments), dirty: true,
 	}
 }
 
@@ -526,6 +495,11 @@ func toolInvocation(tool, arguments string) string {
 		}
 		if command != "" {
 			return "$ " + command
+		}
+	}
+	if tool == "list_directory" {
+		if path := toolArgument(arguments, "path"); path != "" {
+			return "$ ls -a -- " + path
 		}
 	}
 	label := strings.ReplaceAll(tool, "_", " ")
@@ -557,6 +531,13 @@ func toolInvocation(tool, arguments string) string {
 		label += "  " + strings.Join(fields, "  ")
 	}
 	return label
+}
+
+func toolRowInvocation(tool, arguments string) string {
+	if strings.TrimSpace(arguments) == "" {
+		return ""
+	}
+	return strings.TrimPrefix(toolInvocation(tool, arguments), "$ ")
 }
 
 // RenderDiffEntry formats a diff row with clickable zone and clean layout.

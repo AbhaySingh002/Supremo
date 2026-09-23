@@ -89,7 +89,7 @@ Approval mode belongs to the active session:
 - `dry-run` reports mutating actions without applying them
 - Plan Mode permits research and planning, not workspace mutation
 
-`execute_command` is not sandboxed. It is the command path for builds, tests, formatters, and repository scripts. Filesystem tools use path locks, read-before-write hashes, atomic writes, and optional rewind checkpoints. A stale write fails when another agent changes the observed file first.
+`execute_command` is not sandboxed. It is the command path for ordinary Git, builds, tests, formatters, listing, directory creation, and repository scripts. Filesystem tools use path locks, read-before-write hashes, atomic writes, and optional rewind checkpoints. A stale write fails when another agent changes the observed file first.
 
 ## Understand the runtime
 

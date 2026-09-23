@@ -1,43 +1,61 @@
 package ui
 
 import (
-	"fmt"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	zone "github.com/lrstanley/bubblezone"
 )
 
 func (m Model) activityRailWidth() int {
-	if m.width < 120 || !m.showActivity || m.hasTransientSurface() {
+	if m.width < 120 || !m.contextualActivityVisible() || m.hasTransientSurface() {
 		return 0
 	}
 	return min(36, max(30, m.width/4))
 }
 
-func (m Model) activityInspectorOpen() bool {
-	return m.width < 120 && m.showActivity && m.surface == surfaceActivity
+func (m Model) contextualActivityVisible() bool {
+	return m.planDraft || m.session.PlanModeActive() || m.hasActiveSubagent()
+}
+
+func (m Model) hasActiveSubagent() bool {
+	for _, agent := range m.agents {
+		switch strings.ToLower(agent.Status) {
+		case "queued", "running", "cancelling":
+			return true
+		}
+	}
+	return false
 }
 
 func (m Model) hasTransientSurface() bool {
-	return m.surface != surfaceNone && m.surface != surfaceActivity
+	return m.surface != surfaceNone
 }
 
 func (m Model) activityView(width, height int) string {
 	width, height = max(20, width), max(1, height)
 	line := func(value string) string { return ansi.Truncate(value, width-4, "…") }
-	sections := []string{m.styles.Title.Render(m.glyph("◫", "#") + " ACTIVITY")}
-	phase := m.phase
-	if phase == "" {
-		phase = "idle"
+	planActive := m.planDraft || m.session.PlanModeActive()
+	agentsActive := m.hasActiveSubagent()
+	title := "PLAN"
+	if agentsActive && !planActive {
+		title = "AGENTS"
+	} else if agentsActive {
+		title = "PLAN · AGENTS"
 	}
-	run := "○ " + phase
-	if m.active != nil {
-		run = m.spinner.View() + " " + phase
+	sections := []string{m.styles.Title.Render(m.glyph("◫", "#") + " " + title)}
+	if planActive {
+		phase := m.phase
+		if phase == "" {
+			phase = "planning"
+		}
+		run := m.glyph("●", "*") + " " + phase
+		if m.active != nil {
+			run = m.spinner.View() + " " + phase
+		}
+		sections = append(sections, "", m.styles.Muted.Render("plan"), line(run))
 	}
-	sections = append(sections, "", m.styles.Muted.Render("run"), line(run))
-	if len(m.todos) > 0 {
+	if planActive && len(m.todos) > 0 {
 		sections = append(sections, "", m.styles.Muted.Render("tasks"))
 		for _, item := range m.todos {
 			symbol := "○"
@@ -49,36 +67,19 @@ func (m Model) activityView(width, height int) string {
 			sections = append(sections, line(symbol+" "+item.Content))
 		}
 	}
-	if len(m.activity) > 0 {
-		sections = append(sections, "", m.styles.Muted.Render("tools"))
-		start := max(0, len(m.activity)-5)
-		for idx, item := range m.activity[start:] {
-			sections = append(sections, m.activityToolRow(item, start+idx, width-4))
-		}
-	}
-	if len(m.agents) > 0 {
+	if agentsActive {
 		sections = append(sections, "", m.styles.Muted.Render("agents"))
 		for _, item := range m.agents {
+			switch strings.ToLower(item.Status) {
+			case "queued", "running", "cancelling":
+			default:
+				continue
+			}
 			sections = append(sections, line(m.toolIcon("subagent")+" "+item.Label+" "+m.statusSymbol(item.Status)))
 		}
 	}
-	if len(m.todos) == 0 && len(m.activity) == 0 && len(m.agents) == 0 && m.active == nil {
-		sections = append(sections, "", m.styles.Muted.Render("Run details, tools, tasks, and subagents will appear here."))
-	}
 	content := strings.Join(sections, "\n")
 	return m.styles.Text.Padding(1, 2).Width(max(1, width-5)).Height(max(1, height-2)).Render(content)
-}
-
-func (m Model) activityToolRow(item activityEvent, index int, width int) string {
-	status := m.statusSymbol(item.Status)
-	label := formatToolSummary(item.Tool, item.Status, item.Arguments)
-	if label == "" {
-		label = strings.ReplaceAll(item.Tool, "_", " ")
-	}
-	left := m.toolIcon(item.Tool) + " " + m.styles.Muted.Render(ansi.Truncate(label, max(1, width-lipgloss.Width(status)-4), "…"))
-	gap := strings.Repeat(" ", max(1, width-lipgloss.Width(left)-lipgloss.Width(status)))
-	row := left + gap + status
-	return zone.Mark(fmt.Sprintf("activity-tool-%d", index), row)
 }
 
 func (m Model) statusSymbol(status string) string {

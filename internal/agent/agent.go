@@ -22,15 +22,14 @@ import (
 
 // ContextRequest describes the reason a provider prompt is being compiled.
 type ContextRequest struct {
-	Session              *Session
-	TaskID               string
-	Turn                 int
-	Step                 int
-	Objective            string
-	OverflowPressure     int
-	Mode                 tools.ToolMode
-	RequiredCapabilities []string
-	Profile              protocol.Profile
+	Session          *Session
+	TaskID           string
+	Turn             int
+	Step             int
+	Objective        string
+	OverflowPressure int
+	Mode             tools.ToolMode
+	Profile          protocol.Profile
 }
 
 type ToolObservation struct {

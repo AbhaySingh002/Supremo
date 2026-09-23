@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"testing"
 )
@@ -25,105 +24,60 @@ func (t catalogTool) Execute(context.Context, any) (*ToolResult, error) {
 	return BuildToolResult(true, "ok", nil), nil
 }
 
-func TestCatalogRoutesBootstrapFamiliesAndReadOnlyPolicy(t *testing.T) {
+func TestCatalogRoutesEveryEligibleToolInStableOrder(t *testing.T) {
 	registry := NewRegistry()
-	for _, name := range []string{"read_file", "repository_query", "git_log", "git_status"} {
-		caps := CapabilityReadWorkspace
-		if name == "git_log" || name == "git_status" {
-			caps |= CapabilityExecuteProcess
-		}
-		meta := ToolMetadata{CanonicalName: name, Family: "workspace", CapabilityTags: []string{"workspace"}}
-		if name == "git_log" || name == "git_status" {
-			meta.Family, meta.CapabilityTags = "git", []string{"git"}
-		}
-		if name == "read_file" || name == "repository_query" {
-			meta.Bootstrap = true
-		}
-		if err := registry.Register(catalogTool{name: name, caps: caps}, meta); err != nil {
+	for _, tool := range []catalogTool{
+		{name: "read_file", caps: CapabilityReadWorkspace},
+		{name: "write_file", caps: CapabilityWriteWorkspace},
+		{name: "execute_command", caps: CapabilityExecuteProcess},
+		{name: "web_fetch", caps: CapabilityUseNetwork},
+	} {
+		if err := registry.Register(tool); err != nil {
 			t.Fatal(err)
 		}
-	}
-	if err := registry.Register(NewDiscoverTools(registry), ToolMetadata{CanonicalName: "discover_tools", Family: "tool_discovery", CapabilityTags: []string{"tool.discovery"}, Bootstrap: true}); err != nil {
-		t.Fatal(err)
 	}
 	catalog, err := registry.Catalog()
 	if err != nil {
 		t.Fatal(err)
 	}
-	route := catalog.Route(ToolRouteProfile{Mode: ToolModeNormal, RequestedCapabilities: []string{"git"}})
-	got := map[string]bool{}
+
+	route := catalog.Route(ToolRouteProfile{Mode: ToolModeNormal})
+	got := make([]string, 0, len(route.Candidates))
 	for _, candidate := range route.Candidates {
-		got[candidate.Tool.Name] = true
-	}
-	if !got["git_log"] || !got["git_status"] {
-		t.Fatalf("git request missing git tools: %#v", route)
-	}
-	if got["discover_tools"] || got["read_file"] || got["repository_query"] {
-		t.Fatalf("normal chat still auto-attached bootstrap: %#v", route)
-	}
-	idle := catalog.Route(ToolRouteProfile{Mode: ToolModeNormal, Objective: "What is a mutex?"})
-	if len(idle.Candidates) != 0 {
-		t.Fatalf("pure conversation attached tools: %#v", idle)
-	}
-	readOnly := catalog.Route(ToolRouteProfile{Mode: ToolModePlanning, ReadOnly: true, RequestedCapabilities: []string{"git"}})
-	for _, candidate := range readOnly.Candidates {
-		if candidate.Tool.Family == "git" {
-			t.Fatalf("read-only route exposed Git process tool: %#v", candidate)
+		if candidate.Reason != string(ToolModeNormal) {
+			t.Fatalf("candidate reason = %#v", candidate)
 		}
+		got = append(got, candidate.Tool.Name)
 	}
-	if len(readOnly.Rejected) == 0 {
-		t.Fatalf("read-only request was not diagnosed: %#v", readOnly)
+	if strings.Join(got, ",") != "execute_command,read_file,web_fetch,write_file" {
+		t.Fatalf("normal route = %v", got)
+	}
+
+	execution := catalog.Route(ToolRouteProfile{Mode: ToolModeExecution})
+	if len(execution.Candidates) != len(route.Candidates) {
+		t.Fatalf("execution route = %#v", execution)
+	}
+	for _, candidate := range execution.Candidates {
+		if candidate.Reason != string(ToolModeExecution) {
+			t.Fatalf("execution candidate = %#v", candidate)
+		}
 	}
 }
 
-func TestPlanResearchRoutesOnlyLocalCoreAndActivatedTools(t *testing.T) {
+func TestCatalogPreservesReadOnlyAndSideProfileBoundaries(t *testing.T) {
 	registry := NewRegistry()
-	for _, name := range []string{"read_file", "list_directory", "search_file_name", "repository_query", "find_symbol", "web_fetch", "execute_command"} {
-		caps := CapabilityReadWorkspace
-		switch name {
-		case "web_fetch":
-			caps |= CapabilityUseNetwork
-		case "execute_command":
-			caps |= CapabilityExecuteProcess
-		}
-		core := name == "read_file" || name == "list_directory" || name == "search_file_name" || name == "repository_query"
-		if err := registry.Register(catalogTool{name: name, caps: caps}, ToolMetadata{CanonicalName: name, Family: "workspace", CapabilityTags: []string{"workspace"}, PlanningCore: core, Bootstrap: name == "read_file" || name == "repository_query"}); err != nil {
-			t.Fatal(err)
-		}
+	entries := []struct {
+		tool catalogTool
+		meta ToolMetadata
+	}{
+		{catalogTool{name: "read_file", caps: CapabilityReadWorkspace}, ToolMetadata{CanonicalName: "read_file", Family: "filesystem", CapabilityTags: []string{"read"}, Access: ToolAccessRead, SideEffect: ToolSideEffectNone}},
+		{catalogTool{name: "glob", caps: CapabilityReadWorkspace}, ToolMetadata{CanonicalName: "glob", Family: "repository", CapabilityTags: []string{"glob"}, Access: ToolAccessRead, SideEffect: ToolSideEffectNone}},
+		{catalogTool{name: "write_file", caps: CapabilityWriteWorkspace}, ToolMetadata{CanonicalName: "write_file", Family: "filesystem", CapabilityTags: []string{"write"}, Access: ToolAccessWrite, SideEffect: ToolSideEffectWorkspace}},
+		{catalogTool{name: "execute_command", caps: CapabilityExecuteProcess}, ToolMetadata{CanonicalName: "execute_command", Family: "shell", CapabilityTags: []string{"execute"}, Access: ToolAccessDestructive, SideEffect: ToolSideEffectProcess}},
+		{catalogTool{name: "web_fetch", caps: CapabilityUseNetwork}, ToolMetadata{CanonicalName: "web_fetch", Family: "web", CapabilityTags: []string{"fetch"}, Access: ToolAccessRead, SideEffect: ToolSideEffectNetwork}},
 	}
-	if err := registry.Register(NewDiscoverTools(registry), ToolMetadata{CanonicalName: "discover_tools", Family: "tool_discovery", CapabilityTags: []string{"tool.discovery"}, Bootstrap: true, PlanningCore: true}); err != nil {
-		t.Fatal(err)
-	}
-	catalog, err := registry.Catalog()
-	if err != nil {
-		t.Fatal(err)
-	}
-	route := catalog.Route(ToolRouteProfile{Mode: ToolModePlanning, ReadOnly: true, ResearchOnly: true, Objective: "find every symbol"})
-	got := make(map[string]string)
-	for _, candidate := range route.Candidates {
-		got[candidate.Tool.Name] = candidate.Reason
-	}
-	for _, name := range []string{"discover_tools", "read_file", "list_directory", "search_file_name", "repository_query", "find_symbol"} {
-		if got[name] != "planning" {
-			t.Fatalf("planning tools missing %s: %#v", name, route)
-		}
-	}
-	for _, name := range []string{"web_fetch", "execute_command"} {
-		if _, found := got[name]; found {
-			t.Fatalf("plan research exposed %s: %#v", name, route)
-		}
-	}
-
-	route = catalog.Route(ToolRouteProfile{Mode: ToolModePlanning, ReadOnly: true, ResearchOnly: true, RequestedCapabilities: []string{"find_symbol"}})
-	if got := route.Candidates; len(got) != 6 {
-		t.Fatalf("planning route = %#v", route)
-	}
-}
-
-func TestCatalogDiscoveryIsBoundedAndDeterministic(t *testing.T) {
-	registry := NewRegistry()
-	for index := 0; index < 20; index++ {
-		if err := registry.Register(catalogTool{name: fmt.Sprintf("tool_%02d", index)}); err != nil {
+	for _, entry := range entries {
+		if err := registry.Register(entry.tool, entry.meta); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -131,9 +85,20 @@ func TestCatalogDiscoveryIsBoundedAndDeterministic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, second := catalog.Discover("tool", 3), catalog.Discover("tool", 3)
-	if len(first) != 3 || fmt.Sprint(first) != fmt.Sprint(second) || first[0].Name != "tool_00" {
-		t.Fatalf("discovery = %#v / %#v", first, second)
+
+	planning := catalog.Route(ToolRouteProfile{Mode: ToolModePlanning, ReadOnly: true, ResearchOnly: true})
+	got := make([]string, 0, len(planning.Candidates))
+	for _, candidate := range planning.Candidates {
+		if !candidate.Tool.PlanningSafe() {
+			t.Fatalf("unsafe planning tool: %#v", candidate.Tool)
+		}
+		got = append(got, candidate.Tool.Name)
+	}
+	if strings.Join(got, ",") != "glob,read_file" {
+		t.Fatalf("planning route = %v", got)
+	}
+	if side := catalog.Route(ToolRouteProfile{Mode: ToolModeSide}); len(side.Candidates) != 0 {
+		t.Fatalf("side route = %#v", side)
 	}
 }
 
@@ -163,97 +128,5 @@ func TestParallelSafetyIsExplicitAndFailClosed(t *testing.T) {
 	unknown, _ := registry.Descriptor("unknown")
 	if !safe.ParallelSafe || unknown.ParallelSafe {
 		t.Fatalf("parallel safety safe=%v unknown=%v", safe.ParallelSafe, unknown.ParallelSafe)
-	}
-}
-
-func TestCatalogRoutesExecuteCommandForOpenAndPreviewActions(t *testing.T) {
-	registry := NewRegistry()
-	for _, name := range []string{"read_file", "write_file", "execute_command"} {
-		caps := CapabilityReadWorkspace
-		meta := ToolMetadata{CanonicalName: name, Family: "workspace", CapabilityTags: []string{"workspace"}}
-		if name == "execute_command" {
-			caps |= CapabilityExecuteProcess
-			meta.Family, meta.CapabilityTags = "shell", []string{"shell.execute", "terminal", "command", "exec", "run", "open", "launch", "start", "serve", "process", "browse", "preview"}
-		}
-		if err := registry.Register(catalogTool{name: name, caps: caps}, meta); err != nil {
-			t.Fatal(err)
-		}
-	}
-	catalog, err := registry.Catalog()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, prompt := range []string{"open the meal tracker", "launch in chrome", "start the dev server", "preview index.html"} {
-		route := catalog.Route(ToolRouteProfile{Mode: ToolModeNormal, Objective: prompt})
-		found := false
-		for _, candidate := range route.Candidates {
-			if candidate.Tool.Name == "execute_command" {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Fatalf("prompt %q failed to route execute_command: %#v", prompt, route)
-		}
-	}
-}
-
-func TestCatalogBoundsAutomaticActivation(t *testing.T) {
-	registry := NewRegistry()
-	for index := 0; index < 500; index++ {
-		if err := registry.Register(catalogTool{name: fmt.Sprintf("tool_%03d", index)}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	catalog, err := registry.Catalog()
-	if err != nil {
-		t.Fatal(err)
-	}
-	route := catalog.Route(ToolRouteProfile{Mode: ToolModeNormal, Objective: "tool"})
-	if len(route.Candidates) != maxAutomaticToolSchemas || len(route.Rejected) != 500-maxAutomaticToolSchemas {
-		t.Fatalf("unbounded automatic route: candidates=%d rejected=%d", len(route.Candidates), len(route.Rejected))
-	}
-}
-
-func TestCatalogExecutionExposesEveryEligibleTool(t *testing.T) {
-	registry := NewRegistry()
-	for _, tool := range []catalogTool{
-		{name: "read_file", caps: CapabilityReadWorkspace},
-		{name: "write_file", caps: CapabilityWriteWorkspace},
-		{name: "execute_command", caps: CapabilityExecuteProcess},
-	} {
-		if err := registry.Register(tool); err != nil {
-			t.Fatal(err)
-		}
-	}
-	catalog, err := registry.Catalog()
-	if err != nil {
-		t.Fatal(err)
-	}
-	route := catalog.Route(ToolRouteProfile{Mode: ToolModeExecution})
-	got := make([]string, 0, len(route.Candidates))
-	for _, candidate := range route.Candidates {
-		if candidate.Reason != "execution" {
-			t.Fatalf("candidate = %#v, want execution routing", candidate)
-		}
-		got = append(got, candidate.Tool.Name)
-	}
-	if strings.Join(got, ",") != "execute_command,read_file,write_file" {
-		t.Fatalf("execution route = %v", got)
-	}
-}
-
-func BenchmarkCatalogRoute500(b *testing.B) {
-	registry := NewRegistry()
-	for index := 0; index < 500; index++ {
-		_ = registry.Register(catalogTool{name: fmt.Sprintf("tool_%03d", index)})
-	}
-	catalog, err := registry.Catalog()
-	if err != nil {
-		b.Fatal(err)
-	}
-	profile := ToolRouteProfile{Mode: ToolModeNormal, Objective: "tool"}
-	for b.Loop() {
-		_ = catalog.Route(profile)
 	}
 }

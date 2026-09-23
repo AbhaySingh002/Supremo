@@ -73,5 +73,5 @@ one-shot CLI -> app.AgentAPI -------------------------------┤
 - [Agent core](docs/architecture/agent-core.md)
 - [Runtime composition](docs/architecture/runtime-composition.md)
 - [Session context and request construction](docs/architecture/session-context.md)
-- [Dynamic tooling and the tool scheduler](docs/architecture/tooling-and-scheduler.md)
+- [Tooling and the tool scheduler](docs/architecture/tooling-and-scheduler.md)
 - [Multi-agent architecture](docs/architecture/multi-agent.md)

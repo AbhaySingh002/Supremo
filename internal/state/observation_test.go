@@ -79,9 +79,18 @@ func TestExtractObservationSummary_MalformedRawOutputNeverBecomesNegative(t *tes
 		t.Fatalf("CRITICAL BUG: malformed raw output claimed directory is empty: %q", summary)
 	}
 
-	searchSummary, searchNegative, _ := ExtractObservationSummary("search_file_name", "src", nil, true, "completed", malformedOutput, root)
+	searchSummary, searchNegative, _ := ExtractObservationSummary("glob", "src", nil, true, "completed", malformedOutput, root)
 	if searchNegative {
 		t.Fatalf("CRITICAL BUG: malformed raw output was interpreted as negative search observation: %q", searchSummary)
+	}
+}
+
+func TestExtractObservationSummaryGlobUsesStructuredMatches(t *testing.T) {
+	summary, negative, _ := ExtractObservationSummary("glob", ".", map[string]any{
+		"matches": []any{map[string]any{"path": "internal/tools/registry.go"}},
+	}, true, "Glob completed", "", t.TempDir())
+	if negative || summary != "glob in \".\" found 1 match(es): internal/tools/registry.go" {
+		t.Fatalf("glob summary = %q negative=%t", summary, negative)
 	}
 }
 

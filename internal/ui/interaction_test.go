@@ -65,6 +65,104 @@ func TestBubbleZoneMouseInteractions(t *testing.T) {
 	}
 }
 
+func TestToolDetailsUseOneArtifactAwareOpenPath(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client := &behaviorClient{artifact: api.Artifact{Previewable: true, ContentType: "text/plain", Content: []byte(`{"stdout":"ok","exit_code":0}`)}}
+	model := New(client, ".", "tool-open", Options{Context: ctx, Shutdown: cancel})
+	model.session = api.Session{ID: "tool-open", ApprovalMode: "batman"}
+	model.width, model.height = 100, 28
+	model.entries = []transcriptEntry{{kind: entryTool, tool: "execute_command", toolStatus: "completed", content: "Ran go test ./...", arguments: `{"command":"go","args":["test","./..."]}`, artifactID: "artifact-1"}}
+	model.layout()
+	_ = model.View()
+
+	toolZone := zone.Get("tool-0")
+	if toolZone == nil {
+		t.Fatal("tool row did not expose a click zone")
+	}
+	updated, cmd := model.Update(tea.MouseClickMsg(tea.Mouse{X: toolZone.StartX + 1, Y: toolZone.StartY, Button: tea.MouseLeft}))
+	model = updated.(Model)
+	if cmd == nil {
+		t.Fatal("tool row click did not request retained evidence")
+	}
+	updated, _ = model.Update(cmd())
+	model = updated.(Model)
+	if !model.entries[0].expanded || !strings.Contains(model.entries[0].details, "ok") {
+		t.Fatalf("artifact-backed tool did not open: %#v", model.entries[0])
+	}
+
+	model.entries[0].expanded = false
+	model.entries[0].details = "ok\nexit 0"
+	model.input.Reset()
+	updated, _ = model.Update(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+	model = updated.(Model)
+	if !model.entries[0].expanded {
+		t.Fatal("Ctrl+O did not open the latest tool from an empty composer")
+	}
+	model.entries[0].expanded = false
+	model.input.SetValue("draft")
+	updated, _ = model.Update(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+	model = updated.(Model)
+	if model.entries[0].expanded || model.input.Value() != "draft\n" {
+		t.Fatalf("Ctrl+O changed its composing behavior: expanded=%t input=%q", model.entries[0].expanded, model.input.Value())
+	}
+}
+
+func TestCollapsedShellCommandBranchClickOpensDetails(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	model := newTestModel(api.Session{ID: "shell-branch"}, ctx, cancel)
+	model.width, model.height = 100, 28
+	model.entries = []transcriptEntry{{
+		kind: entryTool, tool: "execute_command", toolStatus: "completed", content: "Ran command",
+		arguments: `{"command":"go","args":["test","./..."]}`, details: "ok\nexit 0",
+	}}
+	model.layout()
+	_ = model.View()
+
+	toolZone := zone.Get("tool-0")
+	if toolZone == nil || toolZone.EndY <= toolZone.StartY {
+		t.Fatalf("collapsed shell command did not expose a two-line click zone: %#v", toolZone)
+	}
+	updated, _ := model.Update(tea.MouseClickMsg(tea.Mouse{X: toolZone.StartX + 1, Y: toolZone.EndY, Button: tea.MouseLeft}))
+	model = updated.(Model)
+	if !model.entries[0].expanded {
+		t.Fatal("clicking the shell command branch did not open details")
+	}
+}
+
+func TestExpandedToolDetailsScrollWithKeyboardAndMouse(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	model := newTestModel(api.Session{ID: "tool-scroll"}, ctx, cancel)
+	model.width, model.height = 100, 28
+	model.focus = focusTranscript
+	model.entries = []transcriptEntry{{
+		kind: entryTool, tool: "execute_command", toolStatus: "completed", expanded: true,
+		arguments: `{"command":"printf","args":["output"]}`,
+		details:   strings.Join([]string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}, "\n"),
+	}}
+	model.layout()
+	_ = model.View()
+
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	model = updated.(Model)
+	if model.entries[0].detailOffset != 1 {
+		t.Fatalf("keyboard scroll offset = %d", model.entries[0].detailOffset)
+	}
+
+	_ = model.View()
+	details := zone.Get("tool-details-0")
+	if details == nil {
+		t.Fatal("expanded terminal panel did not expose a scroll zone")
+	}
+	updated, _ = model.Update(tea.MouseWheelMsg(tea.Mouse{X: details.StartX + 1, Y: details.StartY, Button: tea.MouseWheelUp}))
+	model = updated.(Model)
+	if model.entries[0].detailOffset != 0 {
+		t.Fatalf("mouse scroll offset = %d", model.entries[0].detailOffset)
+	}
+}
+
 func TestCopyLastAssistantResponse(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -175,7 +273,6 @@ func TestToolRowClickAndAttachedFilesDisplay(t *testing.T) {
 
 	model := newTestModel(api.Session{ID: "click-attach-test"}, ctx, cancel)
 	model.width, model.height = 120, 35
-	model.showActivity = true
 	model.entries = []transcriptEntry{
 		{
 			kind:    entryUser,

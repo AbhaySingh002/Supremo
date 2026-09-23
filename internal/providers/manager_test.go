@@ -278,6 +278,34 @@ func TestManagerHandlesMissingAndCorruptCredentials(t *testing.T) {
 	}
 }
 
+func TestManagerConfiguresNamedOpenAICompatibleRouteWithoutKey(t *testing.T) {
+	dir := t.TempDir()
+	store := NewFileCredentialStore(dir)
+	if err := store.SetAPIKey("gemini", "key"); err != nil {
+		t.Fatal(err)
+	}
+	manager := newBuiltinManager(t, dir, store)
+	if err := manager.Initialize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	provider, endpoint, model, key := "openai-compatible:ollama", "http://localhost:11434/v1", "llama3.2", ""
+	if err := manager.Configure(context.Background(), ConfigurationUpdate{Provider: &provider, Endpoint: &endpoint, Model: &model, APIKey: &key}); err != nil {
+		t.Fatalf("configure custom provider: %v", err)
+	}
+	gotProvider, gotModel, gotEndpoint, gotKey, _ := manager.GetRuntimeConfig().Get()
+	if gotProvider != provider || gotEndpoint != endpoint || gotModel != model || gotKey != "" {
+		t.Fatalf("custom runtime = %q %q %q %q", gotProvider, gotEndpoint, gotModel, gotKey)
+	}
+	bad := "openai-compatible:bad/name"
+	if err := manager.Configure(context.Background(), ConfigurationUpdate{Provider: &bad}); err == nil {
+		t.Fatal("invalid custom provider name was accepted")
+	}
+	gotProvider, _, _, _, _ = manager.GetRuntimeConfig().Get()
+	if gotProvider != provider {
+		t.Fatalf("invalid custom provider changed runtime to %q", gotProvider)
+	}
+}
+
 func TestManagerRollsBackConfigWhenPersistenceFails(t *testing.T) {
 	dir := t.TempDir()
 	store := NewFileCredentialStore(dir)

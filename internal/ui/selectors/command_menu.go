@@ -39,12 +39,12 @@ type CommandMenu struct {
 func newThemedList(items []list.Item, design theme.Theme, width, height int) list.Model {
 	delegate := list.NewDefaultDelegate()
 	delegate.SetSpacing(0)
-	item := design.Base.Foreground(design.Primary).Background(design.Surface).PaddingLeft(1)
+	item := design.Base.Foreground(design.Primary).PaddingLeft(1)
 	border := lipgloss.NormalBorder()
 	if design.NoColor {
 		border = lipgloss.ASCIIBorder()
 	}
-	selected := design.Base.Foreground(design.Accent).Background(design.Surface).Bold(true).
+	selected := design.Base.Foreground(design.Accent).Bold(true).
 		Border(border, false, false, false, true).BorderForeground(design.Accent)
 	delegate.Styles.NormalTitle = item
 	delegate.Styles.NormalDesc = item.Foreground(design.Secondary)
@@ -57,8 +57,10 @@ func newThemedList(items []list.Item, design theme.Theme, width, height int) lis
 	menu.SetShowStatusBar(false)
 	menu.SetShowPagination(false)
 	menu.SetShowHelp(false)
-	menu.Styles.TitleBar = design.Base.Background(design.Surface).Padding(0, 1)
-	menu.Styles.Title = design.Base.Background(design.Surface).Bold(true).Foreground(design.Accent).Padding(0, 1)
+	filterStyles := menu.Styles.Filter
+	filterStyles.Focused.Prompt = design.Base.Foreground(design.Accent).Bold(true)
+	filterStyles.Focused.Text = design.Base.Foreground(design.Primary)
+	menu.Styles.Filter = filterStyles
 	menu.Styles.NoItems = design.Base.Foreground(design.Secondary)
 	menu.KeyMap.Quit.SetEnabled(false)
 	menu.KeyMap.ForceQuit.SetEnabled(false)
@@ -70,7 +72,7 @@ func newThemedList(items []list.Item, design theme.Theme, width, height int) lis
 // NewCommandMenu creates a reusable command autocomplete component.
 func NewCommandMenu(commands []Command, design theme.Theme) CommandMenu {
 	menu := newThemedList(commandListItems(commands), design, 64, 8)
-	menu.Title = "Command suggestions"
+	menu.SetShowTitle(false)
 	menu.SetFilteringEnabled(false)
 
 	return CommandMenu{list: menu, commands: append([]Command(nil), commands...)}

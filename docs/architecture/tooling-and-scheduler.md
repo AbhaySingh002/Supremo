@@ -1,7 +1,7 @@
-# Dynamic Tooling and the Tool Scheduler
+# Tooling and the Tool Scheduler
 
-Supremo has a static in-process tool registry, but each provider request gets a
-dynamic, bounded view of that registry. Visibility and permission are separate:
+Supremo has a static in-process tool registry. Each provider request gets a
+stable, profile-eligible view of that registry. Visibility and permission are separate:
 a visible schema may be called by the model, but the Tool Manager still enforces
 the runtime policy before side effects occur.
 
@@ -13,20 +13,11 @@ supported modes, approval requirement, inspection behavior, and ParallelSafe
 status. The registry validates this into a ToolDescriptor and builds a
 deterministic catalog.
 
-For a request, the context compiler routes descriptors using:
-
-- the active mode and plan/read-only restrictions;
-- explicitly required capabilities;
-- the task objective, plan step, and working set;
-- earlier tool observations and failures; and
-- bootstrap and planning-core flags.
-
-Execution requests deliberately expose every eligible schema so work can
-continue without a separate activation turn. Planning, exploration, audit, and
-side-answer requests expose a narrower selection. discover_tools is a small
-bootstrap tool that returns matching names and descriptions without sending all
-argument schemas to the provider. Automatic task-match activation is capped at
-six schemas; candidates and rejections are recorded in the context manifest.
+For a request, the context compiler exposes every descriptor allowed by the
+active mode and existing plan/read-only restrictions. The context budget may
+still omit schemas when necessary, and the selected candidates and rejections
+remain recorded in the context manifest. Planning and audit receive only local,
+read-only inspection tools; side-answer requests receive none.
 
 The chosen ActiveTools list is both the provider schema list and the
 prompt-scoped execution allowlist. A fabricated or no-longer-visible name is
@@ -68,10 +59,9 @@ commit in model order
 ~~~
 
 ParallelSafe defaults to false. Supremo marks only proven reentrant work safe,
-such as file inspection/listing, repository and text searches, web fetch, and
-selected delegation calls. Workspace mutations, commands, approvals,
-interaction, plan/todo transitions, git inspection, and unknown tools remain
-exclusive.
+such as file inspection, `glob`, `grep`, web fetch, and selected delegation
+calls. Workspace mutations, commands, approvals, interaction, plan/todo
+transitions, and unknown tools remain exclusive.
 
 An exclusive call is a barrier: it waits for the earlier safe pool to drain and
 finishes before later calls begin. A later fast read may finish physically

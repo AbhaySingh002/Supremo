@@ -76,8 +76,8 @@ Runtime flags are `--provider`, `--model`, `--endpoint`, and `--api-key`. They a
 | Command | Action |
 | --- | --- |
 | `/provider` | Open the provider selector |
-| `/provider provider_id [endpoint]` | Activate a provider or named compatible route |
-| `/providers` | List registered providers and configuration state |
+| `/provider custom` | Open setup for a named OpenAI-compatible endpoint |
+| `/provider provider_id [endpoint]` | Activate a configured provider or named compatible route |
 | `/auth` | Enter the active provider credential in a masked surface |
 | `/endpoint url` | Set the active provider endpoint |
 | `/model` | Refresh configured providers and open the unified model picker |
@@ -88,7 +88,7 @@ Runtime flags are `--provider`, `--model`, `--endpoint`, and `--api-key`. They a
 | `/config reload` | Reload configuration from disk |
 | `/config embeddings credential_provider endpoint model` | Configure an OpenAI-compatible embedding route |
 
-Credentials entered through `/auth` are masked and excluded from transcript history. Selecting an unconfigured provider opens endpoint and credential setup before model selection.
+Credentials entered through `/auth` are masked and excluded from transcript history. Selecting **Custom** in `/provider` stores a named `openai-compatible:<name>` route after collecting its endpoint, optional API key, and model. Selecting another unconfigured provider opens endpoint and credential setup before model selection.
 
 ## Use keyboard controls
 

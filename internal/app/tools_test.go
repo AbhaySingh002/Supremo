@@ -1,6 +1,7 @@
 package app
 
 import (
+	"sort"
 	"testing"
 
 	"github.com/AbhaySingh002/supremo/internal/tools"
@@ -11,20 +12,40 @@ func TestBuiltinToolsetIsMinimalAndPlanSafe(t *testing.T) {
 	if err := registerBuiltinTools(registry); err != nil {
 		t.Fatal(err)
 	}
+	if err := registerSubagentTools(registry, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := registerPlanAndInteractionTools(registry, nil); err != nil {
+		t.Fatal(err)
+	}
 	catalog, err := registry.Catalog()
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, removed := range []string{"create_file", "run_build", "run_tests", "run_formatter"} {
-		if _, ok := catalog.Descriptor(removed); ok {
-			t.Fatalf("redundant tool %q is still registered", removed)
+	registered := make([]string, 0, len(catalog.Tools))
+	for _, descriptor := range catalog.Tools {
+		registered = append(registered, descriptor.Name)
+	}
+	sort.Strings(registered)
+	want := []string{"ask_user_question", "delete_file", "execute_command", "exit_plan_mode", "glob", "grep", "interrupt_agent", "list_agents", "read_file", "rename_file", "replace_in_file", "send_message", "subagent", "todo_write", "wait_agent", "web_fetch", "write_file"}
+	if len(registered) != len(want) {
+		t.Fatalf("registered tools = %v, want %v", registered, want)
+	}
+	for i := range want {
+		if registered[i] != want[i] {
+			t.Fatalf("registered tools = %v, want %v", registered, want)
 		}
 	}
-	if _, ok := catalog.Descriptor("execute_command"); !ok {
-		t.Fatal("canonical command tool is missing")
+	for _, removed := range []string{
+		"create_directory", "discover_tools", "file_info", "find_references", "find_symbol", "git_diff", "git_log", "git_status",
+		"list_directory", "repository_query", "search_file_name", "search_text",
+	} {
+		if _, ok := catalog.Descriptor(removed); ok {
+			t.Fatalf("removed tool %q is still registered", removed)
+		}
 	}
 
-	route := catalog.Route(tools.ToolRouteProfile{Mode: tools.ToolModePlanning, ReadOnly: true, ResearchOnly: true, RequestedCapabilities: []string{"git_status"}})
+	route := catalog.Route(tools.ToolRouteProfile{Mode: tools.ToolModePlanning, ReadOnly: true, ResearchOnly: true})
 	visible := map[string]bool{}
 	for _, candidate := range route.Candidates {
 		visible[candidate.Tool.Name] = true
@@ -32,7 +53,7 @@ func TestBuiltinToolsetIsMinimalAndPlanSafe(t *testing.T) {
 			t.Fatalf("unsafe tool exposed in Plan Mode: %#v", candidate.Tool)
 		}
 	}
-	for _, required := range []string{"read_file", "list_directory", "search_file_name", "repository_query", "discover_tools", "git_status"} {
+	for _, required := range []string{"ask_user_question", "exit_plan_mode", "glob", "grep", "list_agents", "read_file", "subagent", "wait_agent"} {
 		if !visible[required] {
 			t.Fatalf("Plan Mode missing %q: %#v", required, route)
 		}

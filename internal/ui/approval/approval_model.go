@@ -11,9 +11,9 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	zone "github.com/lrstanley/bubblezone"
 
-	"github.com/AbhaySingh002/supremo/internal/ui/components"
 	"github.com/AbhaySingh002/supremo/internal/ui/rendering"
 )
 
@@ -34,11 +34,18 @@ type KeyMap struct {
 
 // DefaultKeyMap returns the canonical approval key bindings.
 var DefaultKeyMap = KeyMap{
-	Approve: key.NewBinding(key.WithKeys("y", "enter"), key.WithHelp("y/enter", "allow")),
+	Approve: key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "allow")),
 	Deny:    key.NewBinding(key.WithKeys("n", "esc"), key.WithHelp("n/esc", "deny")),
 	Edit:    key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit")),
 	Auto:    key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "auto-approve")),
 }
+
+const (
+	approvalAllow = iota
+	approvalAuto
+	approvalEdit
+	approvalDeny
+)
 
 // ApprovalModel is a standalone Bubble Tea sub-model managing tool authorization.
 type ApprovalModel struct {
@@ -46,6 +53,7 @@ type ApprovalModel struct {
 	arguments string
 	deciding  bool
 	editing   bool
+	choice    int
 	err       string
 	input     textarea.Model
 	body      viewport.Model
@@ -75,6 +83,7 @@ func NewApprovalModel(tool, arguments string, st rendering.Styles) *ApprovalMode
 		body:      body,
 		styles:    st,
 		keys:      DefaultKeyMap,
+		choice:    approvalDeny,
 	}
 }
 
@@ -95,6 +104,11 @@ func (m *ApprovalModel) IsEditing() bool { return m.editing }
 
 // SetError sets the validation error message.
 func (m *ApprovalModel) SetError(err string) { m.err = err }
+
+// Select sets the highlighted decision for keyboard and mouse activation.
+func (m *ApprovalModel) Select(choice int) {
+	m.choice = min(approvalDeny, max(approvalAllow, choice))
+}
 
 // Update handles keyboard navigation and editing for the approval dialog.
 func (m *ApprovalModel) Update(msg tea.Msg) (*ApprovalModel, tea.Cmd) {
@@ -141,27 +155,18 @@ func (m *ApprovalModel) Update(msg tea.Msg) (*ApprovalModel, tea.Cmd) {
 		}
 	}
 
-	switch {
-	case key.Matches(keyMsg, m.keys.Approve):
-		return m, func() tea.Msg {
-			return ApprovalActionMsg{Action: "approve", Tool: m.tool, Arguments: m.arguments}
-		}
-	case key.Matches(keyMsg, m.keys.Deny):
-		return m, func() tea.Msg {
-			return ApprovalActionMsg{Action: "deny", Tool: m.tool, Arguments: m.arguments}
-		}
-	case key.Matches(keyMsg, m.keys.Edit):
-		m.editing = true
-		m.err = ""
-		m.input.SetValue(m.arguments)
-		return m, m.input.Focus()
-	case key.Matches(keyMsg, m.keys.Auto):
-		return m, func() tea.Msg {
-			return ApprovalActionMsg{Action: "auto", Tool: m.tool, Arguments: m.arguments}
-		}
-	}
-
 	switch keyMsg.String() {
+	case "up", "k":
+		m.Select(m.choice - 1)
+		return m, nil
+	case "down", "j":
+		m.Select(m.choice + 1)
+		return m, nil
+	case "1", "2", "3", "4":
+		m.Select(int(keyMsg.String()[0] - '1'))
+		return m, nil
+	case "enter":
+		return m, m.choiceAction()
 	case "home":
 		m.body.GotoTop()
 		return m, nil
@@ -169,47 +174,75 @@ func (m *ApprovalModel) Update(msg tea.Msg) (*ApprovalModel, tea.Cmd) {
 		m.body.GotoBottom()
 		return m, nil
 	}
+	switch {
+	case key.Matches(keyMsg, m.keys.Approve):
+		m.Select(approvalAllow)
+		return m, m.choiceAction()
+	case key.Matches(keyMsg, m.keys.Deny):
+		m.Select(approvalDeny)
+		return m, m.choiceAction()
+	case key.Matches(keyMsg, m.keys.Edit):
+		m.editing = true
+		m.err = ""
+		m.input.SetValue(m.arguments)
+		return m, m.input.Focus()
+	case key.Matches(keyMsg, m.keys.Auto):
+		m.Select(approvalAuto)
+		return m, m.choiceAction()
+	}
 	var cmd tea.Cmd
 	m.body, cmd = m.body.Update(msg)
 	return m, cmd
 }
 
-// View renders the approval dialog card.
-func (m *ApprovalModel) View(width, height int) string {
-	boxWidth := min(max(40, width-8), 76)
-	inner := max(20, boxWidth-6)
-
-	badge := m.styles.ApprovalDanger.Render("◆") + " " + m.styles.Title.Render("Approval required")
-	promptText := FormatPrompt(m.tool, m.arguments)
-	prompt := m.styles.Text.Bold(true).Render(promptText)
-
-	var actions string
-	if m.deciding {
-		actions = m.styles.Muted.Render("Submitting decision...")
-	} else if !m.editing {
-		allowLabel, denyLabel, editLabel, autoLabel := m.keys.Approve.Help().Key+" "+m.keys.Approve.Help().Desc, m.keys.Deny.Help().Key+" "+m.keys.Deny.Help().Desc, m.keys.Edit.Help().Key+" "+m.keys.Edit.Help().Desc, m.keys.Auto.Help().Key+" "+m.keys.Auto.Help().Desc
-		if inner < 58 {
-			allowLabel, denyLabel, editLabel, autoLabel = "y allow", "n deny", "e edit", "a auto"
-		}
-		allowBtn := zone.Mark("approval-allow", m.styles.Success.Render(allowLabel))
-		denyBtn := zone.Mark("approval-deny", m.styles.Error.Render(denyLabel))
-		editBtn := zone.Mark("approval-edit", m.styles.Accent.Render(editLabel))
-		autoBtn := zone.Mark("approval-auto", m.styles.Warning.Render(autoLabel))
-		actions = allowBtn + "  " + denyBtn + "  " + editBtn + "  " + autoBtn
+func (m *ApprovalModel) choiceAction() tea.Cmd {
+	action := "deny"
+	switch m.choice {
+	case approvalAllow:
+		action = "approve"
+	case approvalAuto:
+		action = "auto"
+	case approvalEdit:
+		action = "edit"
+		m.editing = true
+		m.err = ""
+		m.input.SetValue(m.arguments)
+		return m.input.Focus()
 	}
+	return func() tea.Msg {
+		return ApprovalActionMsg{Action: action, Tool: m.tool, Arguments: m.arguments}
+	}
+}
 
-	headerHeight := lipgloss.Height(badge) + lipgloss.Height(prompt) + 1
-	actionHeight := lipgloss.Height(actions)
-	availableBody := max(1, height-m.styles.ApprovalModal.GetVerticalFrameSize()-headerHeight-actionHeight-2)
+// View renders a compact, keyboard-first approval decision sheet.
+func (m *ApprovalModel) View(width, height int) string {
+	width = max(20, width)
+	inner := max(16, width-2)
+
+	rule := strings.Repeat("─", width)
+	if m.styles.Ascii {
+		rule = strings.Repeat("-", width)
+	}
+	badge := m.styles.ApprovalDanger.Render("Approval required")
+	promptText := FormatPrompt(m.tool, m.arguments)
+	prompt := m.styles.Text.Bold(true).Render(ansi.Hardwrap(promptText, inner, true))
+	choices := m.choiceView()
+	footer := m.styles.Muted.Render("↑↓ or 1–4 choose · Enter decide · Esc deny")
+	compact := height < 16
+	preamble := []string{m.styles.Muted.Render(rule), badge, prompt, ""}
+	trailer := []string{m.styles.Text.Render("Do you want to proceed?"), choices, "", footer}
+	if compact {
+		preamble = []string{m.styles.Muted.Render(rule), m.styles.Text.Bold(true).Render(ansi.Truncate(promptText, max(8, inner-lipgloss.Width(badge)-3), "…"))}
+		preamble[1] = badge + m.styles.Muted.Render(" · ") + preamble[1]
+		trailer = []string{m.styles.Text.Render("Choose:"), choices, footer}
+	}
+	availableBody := max(1, height-lipgloss.Height(strings.Join(preamble, "\n"))-lipgloss.Height(strings.Join(trailer, "\n")))
 
 	var body string
 	if m.editing {
 		m.input.SetWidth(inner)
 		m.input.SetHeight(max(2, min(6, availableBody-1)))
 		body = m.styles.Muted.Render("Edit JSON arguments (Enter to confirm, Esc to cancel):") + "\n" + m.input.View()
-		if m.err != "" {
-			body += "\n" + m.styles.Error.Render(m.err)
-		}
 	} else {
 		content := FormatArguments(m.tool, m.arguments)
 		if content == "" {
@@ -220,13 +253,36 @@ func (m *ApprovalModel) View(width, height int) string {
 		m.body.SetHeight(min(max(1, m.body.TotalLineCount()), availableBody))
 		body = m.body.View()
 	}
-
-	lines := []string{badge, "", prompt, "", body}
-	if actions != "" {
-		lines = append(lines, "", actions)
+	if m.err != "" {
+		body += "\n" + m.styles.Error.Render("× "+m.err)
 	}
 
-	return components.Card(m.styles.ApprovalModal, boxWidth, "", strings.Join(lines, "\n"))
+	lines := append(append([]string{}, preamble...), body)
+	if m.deciding {
+		lines = append(lines, "", m.styles.Muted.Render("Submitting decision..."))
+	} else if !m.editing {
+		lines = append(lines, trailer...)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m *ApprovalModel) choiceView() string {
+	labels := []string{
+		"Yes, allow once",
+		"Yes, switch this session to auto mode",
+		"Edit command or arguments",
+		"No",
+	}
+	lines := make([]string, 0, len(labels))
+	for index, label := range labels {
+		prefix, style := "  ", m.styles.Muted
+		if index == m.choice {
+			prefix, style = "> ", m.styles.Accent
+		}
+		line := fmt.Sprintf("%s%d. %s", prefix, index+1, label)
+		lines = append(lines, zone.Mark(fmt.Sprintf("approval-choice-%d", index), style.Render(line)))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // FormatArguments presents the exact approval scope without exposing the

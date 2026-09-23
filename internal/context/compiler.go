@@ -182,28 +182,27 @@ type Calibration struct {
 }
 
 type Request struct {
-	SessionID            string
-	TaskID               string
-	Turn                 int
-	Step                 int
-	Continuation         any
-	Objective            string
-	OverflowPressure     int
-	Provider             string
-	Model                string
-	ContextLimit         int
-	Control              string
-	PromptMetadata       models.PromptMetadata
-	ProjectInstructions  string
-	ToolCatalog          tools.ToolCatalog
-	ToolMode             tools.ToolMode
-	ToolReadOnly         bool
-	ToolResearchOnly     bool
-	PlanStep             string
-	RequiredCapabilities []string
-	ToolApprovalMode     tools.ApprovalMode
-	ToolDryRun           bool
-	History              []models.Message
+	SessionID           string
+	TaskID              string
+	Turn                int
+	Step                int
+	Continuation        any
+	Objective           string
+	OverflowPressure    int
+	Provider            string
+	Model               string
+	ContextLimit        int
+	Control             string
+	PromptMetadata      models.PromptMetadata
+	ProjectInstructions string
+	ToolCatalog         tools.ToolCatalog
+	ToolMode            tools.ToolMode
+	ToolReadOnly        bool
+	ToolResearchOnly    bool
+	PlanStep            string
+	ToolApprovalMode    tools.ApprovalMode
+	ToolDryRun          bool
+	History             []models.Message
 }
 
 type ToolObservation struct {
@@ -277,9 +276,6 @@ func (c *Compiler) Prepare(ctx context.Context, request Request) (*Prepared, err
 	requestID, err := contextID()
 	if err != nil {
 		return nil, err
-	}
-	if missing := missingBootstrapTools(route, selected); len(missing) > 0 {
-		return nil, fmt.Errorf("context budget cannot fit bootstrap tool schemas: %s", strings.Join(missing, ", "))
 	}
 	manifest := Manifest{SchemaVersion: SchemaVersion, RequestID: requestID, SessionID: request.SessionID, TaskID: request.TaskID,
 		Provider: request.Provider, Model: request.Model, WorldRevision: worldRevision, CreatedAt: time.Now().UTC(), Budget: budget,
@@ -366,8 +362,8 @@ func hostPlatformName() string {
 	}
 }
 
-// ObserveTool promotes the relevant tool schema for the next compile without
-// treating the untrusted tool output itself as a durable decision or claim.
+// ObserveTool retains successful tool activity in the working set without
+// treating untrusted tool output as a durable decision or claim.
 func (c *Compiler) ObserveTool(ctx context.Context, sessionID, taskID string, observation ToolObservation) error {
 	if strings.TrimSpace(observation.Name) == "" {
 		return nil
@@ -381,8 +377,6 @@ func (c *Compiler) ObserveTool(ctx context.Context, sessionID, taskID string, ob
 	working.Items = decayWorkingSet(working.Items, working.Generation)
 	if observation.Success {
 		working.Items = promote(working.Items, WorkingSetItem{ID: "tool:" + observation.Name, Kind: "tool", LastSeen: working.Generation, PromotedBy: "tool_observation", UpdatedAt: working.UpdatedAt})
-	} else {
-		working.Items = promote(working.Items, WorkingSetItem{ID: "tool_failed:" + observation.Name, Kind: "tool_failed", LastSeen: working.Generation, PromotedBy: string(observation.Status), UpdatedAt: working.UpdatedAt})
 	}
 	return c.saveWorkingSet(ctx, working)
 }
@@ -491,21 +485,12 @@ func (c *Compiler) candidates(ctx context.Context, request Request, working *Wor
 	if strings.TrimSpace(request.PlanStep) != "" {
 		add(Candidate{ID: "task-instruction:" + request.SessionID + ":" + request.TaskID, Kind: "active_task_instruction", Layer: LayerPinned, Content: request.PlanStep, Authority: state.AuthorityRuntime, Freshness: FreshCurrent, Pinned: true})
 	}
-	route := request.ToolCatalog.Route(tools.ToolRouteProfile{Mode: request.ToolMode, ReadOnly: request.ToolReadOnly, ResearchOnly: request.ToolResearchOnly, Objective: request.Objective, Task: request.TaskID, PlanStep: request.PlanStep, WorkingSet: workingIDs(working.Items), RequestedCapabilities: request.RequiredCapabilities, FailedTools: failedToolNames(working.Items), ApprovalMode: request.ToolApprovalMode, DryRun: request.ToolDryRun})
+	route := request.ToolCatalog.Route(tools.ToolRouteProfile{Mode: request.ToolMode, ReadOnly: request.ToolReadOnly, ResearchOnly: request.ToolResearchOnly, ApprovalMode: request.ToolApprovalMode, DryRun: request.ToolDryRun})
 	if request.ToolMode != tools.ToolModeSide && len(route.Candidates) > 0 {
 		add(Candidate{ID: "tool-availability", Kind: "tool_availability", Layer: LayerTools, Content: "The listed native tool schemas are callable in this step. Use a tool directly whenever inspection or an action is required.", Authority: state.AuthorityRuntime, Freshness: FreshCurrent, Pinned: true})
 	}
 	for _, routed := range route.Candidates {
-		signals := map[string]float64{"tool_route": 1}
-		if routed.Reason == "working_set" || routed.Reason == "requested" {
-			signals["working_set"] = 1
-		}
-		add(Candidate{ID: "tool-schema:" + routed.Tool.Name, Kind: "tool_schema", Layer: LayerTools, Content: tools.RenderToolSchemaWithPolicy(routed.Tool, routed.Policy), Authority: state.AuthorityRuntime, Freshness: FreshCurrent, Pinned: routed.Tool.Bootstrap || routed.Requested, Signals: signals})
-	}
-	for _, item := range working.Items {
-		if item.Kind == "capability_denied" {
-			add(Candidate{ID: item.ID, Kind: "tool_activation_denied", Layer: LayerTools, Content: "Previously requested tool capability is unavailable in the current mode or permission context: " + strings.TrimPrefix(item.ID, "capability_denied:"), Authority: state.AuthorityRuntime, Freshness: FreshCurrent, Signals: map[string]float64{"diagnostic": 1}})
-		}
+		add(Candidate{ID: "tool-schema:" + routed.Tool.Name, Kind: "tool_schema", Layer: LayerTools, Content: tools.RenderToolSchemaWithPolicy(routed.Tool, routed.Policy), Authority: state.AuthorityRuntime, Freshness: FreshCurrent, Signals: map[string]float64{"tool_route": 1}})
 	}
 	if request.Objective != "" {
 		add(Candidate{ID: "objective:" + request.SessionID, Kind: "objective", Layer: LayerPinned, Content: request.Objective, Authority: state.AuthorityUser, Freshness: FreshCurrent, Pinned: true})
@@ -517,9 +502,7 @@ func (c *Compiler) candidates(ctx context.Context, request Request, working *Wor
 			add(Candidate{ID: objective.ID, Kind: "objective", Layer: LayerPinned, Content: value.Text, Authority: state.AuthorityUser, Provenance: objective.Provenance, Freshness: FreshCurrent, Pinned: true})
 		}
 	}
-	if !swe {
-		add(Candidate{ID: "workspace:" + c.store.WorkspaceID(), Kind: "workspace", Layer: LayerPinned, Content: fmt.Sprintf("Workspace identity: %s\nWorkspace root path: %s\nHost platform: %s (%s)", c.store.WorkspaceID(), c.store.Root(), hostPlatformName(), runtime.GOARCH), Authority: state.AuthorityFilesystem, Freshness: FreshCurrent, Pinned: true})
-	}
+	add(Candidate{ID: "workspace:" + c.store.WorkspaceID(), Kind: "workspace", Layer: LayerPinned, Content: fmt.Sprintf("Workspace identity: %s\nWorkspace root path: %s\nHost platform: %s (%s)", c.store.WorkspaceID(), c.store.Root(), hostPlatformName(), runtime.GOARCH), Authority: state.AuthorityFilesystem, Freshness: FreshCurrent, Pinned: true})
 	for _, kind := range []string{"requirement", "constraint", "assumption"} {
 		claims, err := c.store.Claims(ctx, kind, false)
 		if err != nil {
@@ -776,8 +759,8 @@ func selectForDecision(candidates []Candidate, budget *Budget, request Request) 
 	haystack := overflowHaystack(request, candidates)
 
 	order := []string{
-		"control", "project_instruction", "objective", "requirement", "constraint", "decision", "preference",
-		"current_focus", "active_task_instruction", "tool_discovery", "tool_schema",
+		"control", "project_instruction", "objective", "workspace", "requirement", "constraint", "decision", "preference",
+		"current_focus", "active_task_instruction", "tool_schema",
 		"side_question", "user_turn", "latest_failure",
 	}
 	switch profile {
@@ -790,18 +773,18 @@ func selectForDecision(candidates []Candidate, budget *Budget, request Request) 
 		}
 	}
 	wanted := map[string]string{
-		"control": "control", "project_instruction": "constraints", "objective": "constraints",
+		"control": "control", "project_instruction": "constraints", "objective": "constraints", "workspace": "workspace",
 		"requirement": "constraints", "constraint": "constraints", "decision": "constraints", "preference": "constraints",
 		"current_focus": "focus", "active_task_instruction": "focus",
 		"known_research_evidence": "verified_fact",
-		"tool_discovery":          "phase_tool", "tool_schema": "phase_tool",
-		"side_question": "user_turn", "user_turn": "user_turn", "latest_failure": "latest_failure",
+		"tool_schema":             "phase_tool",
+		"side_question":           "user_turn", "user_turn": "user_turn", "latest_failure": "latest_failure",
 		"message": "conversation", "tool_result": "latest_feedback",
 		"source": "exact_source", "repository": "exact_source",
 	}
 	requiredKind := map[string]bool{
 		"control": true, "objective": true, "current_focus": true, "active_task_instruction": true,
-		"tool_schema": true, "tool_discovery": true, "user_turn": true, "side_question": true,
+		"tool_schema": true, "user_turn": true, "side_question": true,
 	}
 
 	byKind := map[string][]Candidate{}
@@ -1098,10 +1081,7 @@ func systemCandidateOrder(candidate Candidate) int {
 			return 45 // L1: Objectives, Claims (requirements/constraints/decisions)
 		}
 	case LayerTools:
-		if candidate.Kind == "tool_discovery" {
-			return 30 // L8 Core: Bootstrap Tool discovery & schemas
-		}
-		return 70 // L8 Dynamic: On-demand activated tool schemas
+		return 70 // L8: Profile-eligible tool schemas
 	case LayerState:
 		return 50 // L2: Active plan, working memory, tasks
 	case LayerDurableObs:
@@ -1375,16 +1355,6 @@ func workingIDs(items []WorkingSetItem) []string {
 	return ids
 }
 
-func failedToolNames(items []WorkingSetItem) []string {
-	names := make([]string, 0)
-	for _, item := range items {
-		if item.Kind == "tool_failed" {
-			names = append(names, strings.TrimPrefix(item.ID, "tool_failed:"))
-		}
-	}
-	return names
-}
-
 func activeTools(selected []Candidate) []string {
 	tools := make([]string, 0)
 	for _, candidate := range selected {
@@ -1436,23 +1406,6 @@ func selectedToolMetrics(route tools.ToolRoute, selected []Candidate, rejected [
 	}
 	selection.SchemaTokensAvoided = max(0, selection.EligibleSchemaTokens-selection.EmittedSchemaTokens)
 	return selection
-}
-
-func missingBootstrapTools(route tools.ToolRoute, selected []Candidate) []string {
-	active := map[string]bool{}
-	for _, candidate := range selected {
-		if candidate.Kind == "tool_schema" {
-			active[strings.TrimPrefix(candidate.ID, "tool-schema:")] = true
-		}
-	}
-	missing := []string{}
-	for _, candidate := range route.Candidates {
-		if candidate.Tool.Bootstrap && !active[candidate.Tool.Name] {
-			missing = append(missing, candidate.Tool.Name)
-		}
-	}
-	sort.Strings(missing)
-	return missing
 }
 
 func upgradeRepresentation(candidate Candidate, representations []state.RepositoryRepresentation, pressure int) Candidate {

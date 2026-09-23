@@ -21,22 +21,39 @@ func TestApprovalModelAllowDenyEditAuto(t *testing.T) {
 
 	// 1. View rendering
 	view := model.View(80, 20)
-	if !strings.Contains(view, "Approval required") || !strings.Contains(view, "Run shell command?") || !strings.Contains(view, "y/enter allow") {
+	if !strings.Contains(view, "Approval required") || !strings.Contains(view, "Run shell command?") || !strings.Contains(view, "1. Yes, allow once") || !strings.Contains(view, "> 4. No") {
 		t.Fatalf("unexpected approval view:\n%s", view)
 	}
 
-	// 2. Test 'y' emits allow
-	_, cmd := model.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	// 2. Enter uses the safe default denial.
+	_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
-		t.Fatal("expected command on 'y'")
+		t.Fatal("expected command on Enter")
 	}
 	msg := cmd()
 	act, ok := msg.(approval.ApprovalActionMsg)
+	if !ok || act.Action != "deny" {
+		t.Fatalf("expected default deny action, got %#v", msg)
+	}
+	model, _ = model.Update(tea.KeyPressMsg{Code: '2', Text: "2"})
+	_, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	act, ok = cmd().(approval.ApprovalActionMsg)
+	if !ok || act.Action != "auto" {
+		t.Fatalf("expected numbered auto action, got %#v", act)
+	}
+
+	// 3. Test 'y' emits allow.
+	_, cmd = model.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if cmd == nil {
+		t.Fatal("expected command on 'y'")
+	}
+	msg = cmd()
+	act, ok = msg.(approval.ApprovalActionMsg)
 	if !ok || act.Action != "approve" {
 		t.Fatalf("expected approve action, got %#v", msg)
 	}
 
-	// 3. Test 'n' emits deny
+	// 4. Test 'n' emits deny.
 	_, cmd = model.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	if cmd == nil {
 		t.Fatal("expected command on 'n'")
@@ -47,7 +64,7 @@ func TestApprovalModelAllowDenyEditAuto(t *testing.T) {
 		t.Fatalf("expected deny action, got %#v", msg)
 	}
 
-	// 4. Test 'a' emits auto-approve
+	// 5. Test 'a' emits auto-approve.
 	_, cmd = model.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	if cmd == nil {
 		t.Fatal("expected command on 'a'")
@@ -58,7 +75,7 @@ func TestApprovalModelAllowDenyEditAuto(t *testing.T) {
 		t.Fatalf("expected auto action, got %#v", msg)
 	}
 
-	// 5. Test 'e' enters editing mode
+	// 6. Test 'e' enters editing mode.
 	model, cmd = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 	if !model.IsEditing() {
 		t.Fatal("expected approval to be in editing mode after 'e'")
@@ -101,7 +118,7 @@ func TestApprovalBodyScrollsWithoutHidingActions(t *testing.T) {
 	if height := lipgloss.Height(view); height > 12 {
 		t.Fatalf("approval height = %d, want <= 12\n%s", height, view)
 	}
-	if !strings.Contains(view, "y allow") || !strings.Contains(view, "n deny") {
+	if !strings.Contains(view, "1. Yes, allow once") || !strings.Contains(view, "4. No") {
 		t.Fatalf("approval actions were clipped:\n%s", view)
 	}
 	model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnd})

@@ -242,3 +242,34 @@ func TestExecuteCommandPreservesEnvironmentStreamsAndExitCode(t *testing.T) {
 		t.Fatalf("command diagnostics=%#v message=%q", result.Data, result.Message)
 	}
 }
+
+func TestExecuteCommandRunsGitBuildAndTestCommands(t *testing.T) {
+	for _, command := range []string{"git", "go"} {
+		if _, err := exec.LookPath(command); err != nil {
+			t.Skipf("%s is unavailable", command)
+		}
+	}
+	root := t.TempDir()
+	ctx := tools.WithWorkspace(context.Background(), root)
+	run := func(command string, args ...string) {
+		t.Helper()
+		result, err := (&ExecuteCommand{}).Execute(ctx, map[string]any{"command": command, "args": args})
+		if err != nil || result == nil || !result.Success {
+			t.Fatalf("%s %s: result=%#v err=%v", command, strings.Join(args, " "), result, err)
+		}
+	}
+
+	run("git", "init")
+	run("git", "status", "--porcelain")
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/command-test\n\ngo 1.26.4\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "main_test.go"), []byte("package main\n\nimport \"testing\"\n\nfunc TestMain(t *testing.T) {}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	run("go", "test", "./...")
+	run("go", "build", "./...")
+}

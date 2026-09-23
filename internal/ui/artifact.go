@@ -84,7 +84,7 @@ func toolResultDetails(tool, raw string) string {
 	var value any
 	if json.Unmarshal([]byte(raw), &value) != nil {
 		if looksLikeRawJSON(raw) {
-			return "Structured output retained; open details to inspect it."
+			return "Structured output retained; open it to inspect."
 		}
 		return safeText(raw)
 	}

@@ -7,7 +7,7 @@ import (
 
 func TestRegistryPreservesCommandSurface(t *testing.T) {
 	want := []string{
-		"/activity", "/approve", "/auth", "/batman", "/cancel", "/clear", "/config", "/context", "/copy", "/delete-session", "/deny", "/diff", "/doctor", "/dry-run", "/endpoint", "/exit", "/export", "/help", "/index", "/init", "/krypton", "/mode", "/model", "/models", "/new", "/plan", "/provider", "/providers", "/rename-session", "/reset", "/rewind", "/session", "/side", "/strict", "/superman", "/tasks", "/tools", "/usage", "/ux",
+		"/activity", "/approve", "/auth", "/batman", "/cancel", "/clear", "/config", "/context", "/copy", "/delete-session", "/deny", "/diff", "/doctor", "/dry-run", "/endpoint", "/exit", "/export", "/help", "/index", "/init", "/krypton", "/mode", "/model", "/models", "/new", "/plan", "/provider", "/rename-session", "/reset", "/rewind", "/session", "/side", "/strict", "/superman", "/tasks", "/tools", "/usage", "/ux",
 	}
 	items := NewRegistry().List()
 	got := make([]string, len(items))
@@ -51,7 +51,7 @@ func TestRegistryParsesCanonicalIntents(t *testing.T) {
 }
 
 func TestRegistryRejectsInvalidArguments(t *testing.T) {
-	for _, input := range []string{"/auth visible-key", "/diff now", "/context nope", "/index semantic maybe", "/unknown"} {
+	for _, input := range []string{"/auth visible-key", "/diff now", "/context nope", "/index semantic maybe", "/providers", "/unknown"} {
 		if _, handled, err := NewRegistry().Parse(input); !handled || err == nil {
 			t.Fatalf("Parse(%q) = handled %t, err %v", input, handled, err)
 		}
