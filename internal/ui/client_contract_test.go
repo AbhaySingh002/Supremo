@@ -82,6 +82,7 @@ func TestPromptComposerClearsOnlyAfterAcceptance(t *testing.T) {
 	}
 
 	model.active = &activeTask{id: 2, kind: taskAgent}
+	model.appendEntry(entryUser, "keep this request")
 	updated, _ = model.Update(promptAcceptedMsg{id: 2, display: "keep this request", receipt: api.Receipt{Accepted: true, RunID: "run-2"}})
 	model = updated.(Model)
 	if model.input.Value() != "" || len(model.entries) == 0 || model.entries[len(model.entries)-2].kind != entryUser {

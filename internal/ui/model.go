@@ -1326,6 +1326,7 @@ func (m *Model) startTask(input string) tea.Cmd {
 	m.paletteOpen = false
 	m.pendingInput = input
 	m.input.Blur()
+	m.appendEntry(entryUser, input)
 	for _, warning := range warnings {
 		m.appendEntry(entryStatus, "@ "+warning)
 	}

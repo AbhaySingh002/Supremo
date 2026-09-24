@@ -169,7 +169,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingInput = ""
 		m.resetComposer()
 		m.collapseCompletedToolBatches()
-		m.appendEntry(entryUser, msg.display)
 		m.setStatus("Queued for execution")
 		return m, m.spinner.Tick
 	case cancelRunResultMsg:
