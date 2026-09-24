@@ -123,7 +123,7 @@ func TestCompiler100RoundsLongHorizonContextComposition(t *testing.T) {
 	// 4. Compile prompt
 	registry := tools.NewRegistry()
 	catalog, _ := registry.Catalog()
-	compiler := New(store, nil)
+	compiler := New(store)
 
 	req := Request{
 		SessionID:   sessionID,

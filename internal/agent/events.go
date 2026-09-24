@@ -37,7 +37,6 @@ type ProgressEvent struct {
 	Diff       string
 	StepID     string
 	Checklist  *models.TaskChecklist
-	Checkpoint *tools.CheckpointSummary
 }
 
 func (a *Agent) emit(event ProgressEvent) {
@@ -47,10 +46,7 @@ func (a *Agent) emit(event ProgressEvent) {
 }
 
 func (a *Agent) reportTool(event tools.Event) {
-	if event.Checkpoint != nil {
-		a.emit(ProgressEvent{Kind: ProgressCheckpoint, Tool: event.Tool, Checkpoint: event.Checkpoint, SessionID: event.SessionID, StepID: event.TaskID})
-		return
-	}
+
 	kind := ProgressTool
 	if event.Status == "waiting approval" || event.Status == "approved" || event.Status == "denied" {
 		kind = ProgressApproval

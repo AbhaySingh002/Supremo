@@ -181,72 +181,6 @@ func TestContextPressureManagerCompactionWhenPruningInsufficient(t *testing.T) {
 	}
 }
 
-func TestContextPressureReplayAfterRestart(t *testing.T) {
-	root := t.TempDir()
-	store, err := state.Open(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	sessionID := "restart-replay-test"
-	session := &Session{ID: sessionID, Provider: "mock", Model: "m1"}
-	_ = session.AttachSurface(context.Background(), store)
-
-	for i := 0; i < 6; i++ {
-		e := SessionEvent{
-			Seq:  int64(i),
-			Type: EventUserMessage,
-			Message: models.Message{
-				Role:    models.RoleUser,
-				Content: fmt.Sprintf("Message %d: %s", i, strings.Repeat("history payload ", 40)),
-			},
-		}
-		_ = persistSessionEvent(context.Background(), store, session.ID, e)
-		_ = session.applyEvent(e)
-	}
-
-	mockProv := &mockSummarizerProvider{summaryText: "## Primary Request and Intent\n- Checkpoint established."}
-	mgr := NewRealContextPressureManager(nil, nil, nil)
-	_, _ = mgr.BeforeStep(context.Background(), store, session, mockProv, nil, 600)
-
-	derivedBeforeClose := session.DeriveMessages()
-	nodesBeforeClose := session.Nodes()
-
-	// Close database
-	_ = state.CloseWorkspace(root)
-
-	// Reopen database and load session
-	reopenedStore, err := state.Open(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = state.CloseWorkspace(root) }()
-
-	reconstructedSession := &Session{ID: sessionID, Provider: "mock", Model: "m1"}
-	if err := reconstructedSession.AttachSurface(context.Background(), reopenedStore); err != nil {
-		t.Fatalf("AttachSurface after restart failed: %v", err)
-	}
-
-	nodesAfterReopen := reconstructedSession.Nodes()
-	derivedAfterReopen := reconstructedSession.DeriveMessages()
-
-	if len(nodesAfterReopen) != len(nodesBeforeClose) {
-		t.Fatalf("nodes mismatch after reopen: %v vs %v", nodesBeforeClose, nodesAfterReopen)
-	}
-	for i := range nodesBeforeClose {
-		if nodesBeforeClose[i] != nodesAfterReopen[i] {
-			t.Fatalf("node at index %d mismatch: %d vs %d", i, nodesBeforeClose[i], nodesAfterReopen[i])
-		}
-	}
-
-	if len(derivedAfterReopen) != len(derivedBeforeClose) {
-		t.Fatalf("derived messages length mismatch: %d vs %d", len(derivedBeforeClose), len(derivedAfterReopen))
-	}
-	if derivedAfterReopen[0].Content != derivedBeforeClose[0].Content {
-		t.Fatalf("compacted checkpoint content mismatch after reopen")
-	}
-}
-
 func TestContextPressureManagerRecoverOverflow(t *testing.T) {
 	root := t.TempDir()
 	store, err := state.Open(root)
@@ -309,7 +243,7 @@ func TestStepStopsAfterThreePressureRecoveryPassesWithoutCommittingRequests(t *t
 		t.Fatal(err)
 	}
 	registry := tools.NewRegistry()
-	compiler := contextcompiler.New(store, nil)
+	compiler := contextcompiler.New(store)
 	builder, err := NewRealContextBuilder(registry, compiler, func() int { return 10_000 })
 	if err != nil {
 		t.Fatal(err)

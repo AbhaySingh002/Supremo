@@ -44,7 +44,7 @@ func (t *ExecuteCommand) Name() string {
 func (t *ExecuteCommand) Capabilities() tools.CapabilitySet { return tools.CapabilityExecuteProcess }
 
 func (t *ExecuteCommand) Description() string {
-	return "Approved escape hatch for arbitrary commands; it is not sandboxed. Returns bounded stdout and stderr."
+	return "Approved escape hatch for arbitrary commands; it is not sandboxed. Returns bounded stdout and stderr. You can use 'bash' as the command and '-c' with a chained script to run multiple commands at once (e.g. find + grep)."
 }
 
 func (t *ExecuteCommand) Schema() any {
@@ -53,7 +53,7 @@ func (t *ExecuteCommand) Schema() any {
 		"properties": map[string]any{
 			"command": map[string]any{
 				"type":        "string",
-				"description": "The command to execute (e.g., 'go', 'npm', 'python')",
+				"description": "The command to execute (e.g., 'bash', 'go', 'npm', 'python')",
 			},
 			"args": map[string]any{
 				"type":        "array",

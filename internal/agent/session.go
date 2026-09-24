@@ -71,7 +71,6 @@ type RetryConfig struct {
 
 type UXConfig struct {
 	Checklist *bool `json:"checklist,omitempty"`
-	Rewind    *bool `json:"rewind,omitempty"`
 }
 
 // ChecklistEnabled defaults the display-only progress protocol on.
@@ -84,19 +83,6 @@ func (s *Session) SetChecklistEnabled(root string, enabled bool) error {
 		s.Features = &FeatureConfig{}
 	}
 	s.Features.UX.Checklist = &enabled
-	return s.Save(root)
-}
-
-// RewindEnabled defaults file-scoped mutation checkpoints on.
-func (s *Session) RewindEnabled() bool {
-	return s == nil || s.Features == nil || s.Features.UX.Rewind == nil || *s.Features.UX.Rewind
-}
-
-func (s *Session) SetRewindEnabled(root string, enabled bool) error {
-	if s.Features == nil {
-		s.Features = &FeatureConfig{}
-	}
-	s.Features.UX.Rewind = &enabled
 	return s.Save(root)
 }
 

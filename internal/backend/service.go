@@ -13,7 +13,6 @@ import (
 	interactionbroker "github.com/AbhaySingh002/supremo/internal/interaction"
 	"github.com/AbhaySingh002/supremo/internal/interaction/questions"
 	"github.com/AbhaySingh002/supremo/internal/providers"
-	"github.com/AbhaySingh002/supremo/internal/repository"
 	"github.com/AbhaySingh002/supremo/internal/state"
 	"github.com/AbhaySingh002/supremo/internal/tools"
 )
@@ -32,7 +31,6 @@ type Service struct {
 	subagents    *agent.SubagentManager
 	providers    *providers.Manager
 	registry     *tools.Registry
-	repository   *repository.Service
 	compiler     *contextcompiler.Compiler
 	questions    *questions.Service
 	interactions *interactionbroker.Broker
@@ -48,12 +46,12 @@ type Service struct {
 	wg        sync.WaitGroup
 }
 
-func New(workspace, version string, store *state.Store, runtimes *agent.RuntimeManager, subagents *agent.SubagentManager, providerManager *providers.Manager, registry *tools.Registry, repositoryService *repository.Service, compiler *contextcompiler.Compiler, questionService *questions.Service, broker *interactionbroker.Broker) (*Service, error) {
-	if workspace == "" || store == nil || runtimes == nil || subagents == nil || providerManager == nil || registry == nil || repositoryService == nil || compiler == nil || questionService == nil || broker == nil {
-		return nil, errors.New("workspace, state, runtimes, subagents, providers, tools, repository, context, questions, and interactions are required")
+func New(workspace, version string, store *state.Store, runtimes *agent.RuntimeManager, subagents *agent.SubagentManager, providerManager *providers.Manager, registry *tools.Registry, compiler *contextcompiler.Compiler, questionService *questions.Service, broker *interactionbroker.Broker) (*Service, error) {
+	if workspace == "" || store == nil || runtimes == nil || subagents == nil || providerManager == nil || registry == nil || compiler == nil || questionService == nil || broker == nil {
+		return nil, errors.New("workspace, state, runtimes, subagents, providers, tools, context, questions, and interactions are required")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Service{workspace: workspace, version: version, store: store, runtimes: runtimes, subagents: subagents, providers: providerManager, registry: registry, repository: repositoryService, compiler: compiler, questions: questionService, interactions: broker,
+	return &Service{workspace: workspace, version: version, store: store, runtimes: runtimes, subagents: subagents, providers: providerManager, registry: registry, compiler: compiler, questions: questionService, interactions: broker,
 		ctx: ctx, cancel: cancel, workers: make(map[string]bool), active: make(map[string]string)}, nil
 }
 

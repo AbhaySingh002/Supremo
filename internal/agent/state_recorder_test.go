@@ -26,18 +26,3 @@ func TestStateRecorderStoresRawToolOutputAndReturnsEnrichment(t *testing.T) {
 		t.Fatalf("raw artifact = %q, %v", stored, err)
 	}
 }
-
-func TestStateRecorderPublishesCheckpointAvailability(t *testing.T) {
-	root := t.TempDir()
-	store, err := state.Open(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = state.CloseWorkspace(root) })
-	recorder := stateRecorder{store: store, root: root, sessionID: "chat"}
-	recorder.RecordToolLifecycle(context.Background(), tools.Lifecycle{Tool: "write_file", Status: "checkpoint", Checkpoint: &tools.CheckpointSummary{ID: "checkpoint-1", Files: 1}})
-	events, err := store.Events(context.Background(), state.EventQuery{SessionID: "chat", Type: "checkpoint.available"})
-	if err != nil || len(events) != 1 {
-		t.Fatalf("checkpoint events = %#v, %v", events, err)
-	}
-}

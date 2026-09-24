@@ -14,7 +14,6 @@ import (
 	"github.com/AbhaySingh002/supremo/internal/interaction/questions"
 	"github.com/AbhaySingh002/supremo/internal/parser/models"
 	"github.com/AbhaySingh002/supremo/internal/providers"
-	"github.com/AbhaySingh002/supremo/internal/repository"
 	"github.com/AbhaySingh002/supremo/internal/state"
 	"github.com/AbhaySingh002/supremo/internal/tools"
 )
@@ -31,8 +30,7 @@ type AgentAPI interface {
 	SetPlanMode(context.Context, *agent.Session, bool) error
 	ClearMemory(context.Context, string) error
 	ReadAllTranscript(context.Context, string) ([]models.Message, error)
-	Checkpoints(string, string) ([]tools.CheckpointSummary, error)
-	Rewind(context.Context, string, string, string, bool) (tools.RewindResult, error)
+
 	DeleteSession(context.Context, string, string) error
 	SetDebug(bool)
 	Debug() bool
@@ -55,7 +53,6 @@ type App struct {
 	ToolManager     ToolActivityAPI
 	QuestionService *questions.Service
 	State           *state.Store
-	Repository      *repository.Service
 	Context         *contextcompiler.Compiler
 	Backend         *backend.Service
 	Workspace       string
@@ -95,19 +92,6 @@ func NewWithRuntimeOverrides(overrides providers.RuntimeOverrides) (*App, error)
 	if err != nil {
 		return nil, fmt.Errorf("initialize provider manager: %w", err)
 	}
-	embeddings, err := providerManager.EmbeddingSettings()
-	if err != nil {
-		return nil, fmt.Errorf("load embedding settings: %w", err)
-	}
-	var embeddingProvider repository.EmbeddingProvider
-	if embeddings.Endpoint != "" && embeddings.Model != "" && embeddings.APIKey != "" {
-		embeddingProvider = repository.OpenAICompatibleEmbeddings{Endpoint: embeddings.Endpoint, ModelName: embeddings.Model, APIKey: embeddings.APIKey}
-	}
-	index, err := repository.New(workspace, store, embeddingProvider)
-	if err != nil {
-		return nil, fmt.Errorf("open repository index: %w", err)
-	}
-	index.Start()
 
 	// 2. Create Tool Registry and Question Service.
 	registry := tools.NewRegistry()
@@ -128,7 +112,7 @@ func NewWithRuntimeOverrides(overrides providers.RuntimeOverrides) (*App, error)
 	}
 
 	// 6. Load the fixed prompt templates once.
-	compiler := contextcompiler.New(store, index)
+	compiler := contextcompiler.New(store)
 	contextBuilder, err := agent.NewRealContextBuilder(registry, compiler, providerManager.ContextLimit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load prompts: %w", err)
@@ -145,7 +129,6 @@ func NewWithRuntimeOverrides(overrides providers.RuntimeOverrides) (*App, error)
 			transcript,
 			newRuntimeHooks(workspace, store),
 		)
-		appAgent.SetRepository(index)
 		return appAgent, nil
 	})
 	subagents, err := agent.NewSubagentManager(workspace, store, runtimes)
@@ -158,7 +141,7 @@ func NewWithRuntimeOverrides(overrides providers.RuntimeOverrides) (*App, error)
 	if err := subagents.Recover(ctx); err != nil {
 		return nil, fmt.Errorf("recover subagents: %w", err)
 	}
-	backendService, err := backend.New(workspace, "dev", store, runtimes, subagents, providerManager, registry, index, compiler, questionService, interactionBroker)
+	backendService, err := backend.New(workspace, "dev", store, runtimes, subagents, providerManager, registry, compiler, questionService, interactionBroker)
 	if err != nil {
 		return nil, fmt.Errorf("initialize backend service: %w", err)
 	}
@@ -172,7 +155,6 @@ func NewWithRuntimeOverrides(overrides providers.RuntimeOverrides) (*App, error)
 		ToolManager:     runtimes,
 		QuestionService: questionService,
 		State:           store,
-		Repository:      index,
 		Context:         compiler,
 		Backend:         backendService,
 		Workspace:       workspace,

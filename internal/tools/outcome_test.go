@@ -69,12 +69,7 @@ func TestClassifyToolOutcome(t *testing.T) {
 			err:      context.Canceled,
 			expected: ToolOutcomeCancelled,
 		},
-		{
-			name:     "checkpoint corruption fatal error",
-			result:   nil,
-			err:      classify(ErrorClassCheckpoint, errors.New("checkpoint restore failed")),
-			expected: ToolOutcomeFatal,
-		},
+
 		{
 			name:     "internal panic fatal error",
 			result:   nil,

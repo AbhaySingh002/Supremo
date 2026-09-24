@@ -78,7 +78,7 @@ func TestCanonicalMessageReconstruction(t *testing.T) {
 	}
 
 	// 2. Verify Compiler assembles them into causal interactions
-	compiler := New(store, nil)
+	compiler := New(store)
 	prompt, err := compiler.Compile(ctx, Request{
 		SessionID:    "sess-1",
 		TaskID:       "task-1",
@@ -144,7 +144,7 @@ func TestCausalAtomicInteractionPruning(t *testing.T) {
 		},
 	})
 
-	compiler := New(store, nil)
+	compiler := New(store)
 	prompt, err := compiler.Compile(ctx, Request{
 		SessionID:    "sess-atomic",
 		TaskID:       "task-atomic",

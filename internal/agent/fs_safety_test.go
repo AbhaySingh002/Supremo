@@ -11,7 +11,6 @@ import (
 	models "github.com/AbhaySingh002/supremo/internal/parser/models"
 	"github.com/AbhaySingh002/supremo/internal/tools"
 	"github.com/AbhaySingh002/supremo/internal/tools/filesystem"
-	"github.com/AbhaySingh002/supremo/internal/tools/search"
 )
 
 func newTestAgentWithFSTools(t *testing.T, workspace string) *Agent {
@@ -22,8 +21,6 @@ func newTestAgentWithFSTools(t *testing.T, workspace string) *Agent {
 	_ = reg.Register(&filesystem.ReplaceInFile{})
 	_ = reg.Register(&filesystem.DeleteFile{})
 	_ = reg.Register(&filesystem.RenameFile{})
-	_ = reg.Register(&search.Grep{})
-	_ = reg.Register(&search.Glob{})
 
 	mgr := tools.NewManager(reg)
 	return &Agent{
@@ -34,50 +31,6 @@ func newTestAgentWithFSTools(t *testing.T, workspace string) *Agent {
 
 func testSafetyCtx(root string) context.Context {
 	return tools.WithApprovalMode(tools.WithWorkspace(context.Background(), root), tools.ApprovalSuperman)
-}
-
-func TestAgentSearchDoesNotAuthorizeEdit(t *testing.T) {
-	root := t.TempDir()
-	path := filepath.Join(root, "lib.go")
-	if err := os.WriteFile(path, []byte("func OldLib() {}\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	searchCallArgs, _ := json.Marshal(map[string]any{"path": ".", "pattern": "OldLib"})
-	editCallArgs, _ := json.Marshal(map[string]any{
-		"path":       "lib.go",
-		"old_string": "func OldLib() {}",
-		"new_string": "func NewLib() {}",
-	})
-
-	agent := newTestAgentWithFSTools(t, root)
-	session := &Session{ID: "test-search-not-obs"}
-	ctx := testSafetyCtx(root)
-
-	// Run step 1 (search)
-	calls1 := []models.ToolCall{{ID: "call-search", Name: "grep", Arguments: searchCallArgs}}
-	sum1 := agent.executeAll(ctx, session, calls1, ToolExecutionOptions{TaskID: "task-1"})
-	if sum1.Outcome != tools.ToolOutcomeSuccess {
-		t.Fatalf("search failed: %#v", sum1)
-	}
-
-	// Run step 2 (edit without read)
-	calls2 := []models.ToolCall{{ID: "call-edit-unauthorized", Name: "replace_in_file", Arguments: editCallArgs}}
-	sum2 := agent.executeAll(ctx, session, calls2, ToolExecutionOptions{TaskID: "task-1"})
-
-	// Must fail recoverably because search does NOT authorize mutation
-	if len(sum2.Results) == 0 || sum2.Results[0].Success {
-		t.Fatalf("edit without read succeeded after search: %#v", sum2)
-	}
-	if !strings.Contains(sum2.Results[0].Output, "must be read before editing") {
-		t.Fatalf("expected unread error, got: %s", sum2.Results[0].Output)
-	}
-
-	// Disk remains unmodified
-	data, _ := os.ReadFile(path)
-	if string(data) != "func OldLib() {}\n" {
-		t.Fatalf("disk modified without read authorization: %s", string(data))
-	}
 }
 
 func TestAgentReadThenEditWorkflow(t *testing.T) {

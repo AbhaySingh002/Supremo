@@ -85,7 +85,7 @@ func TestCompilerDurableObservationsSurviveLongHorizon(t *testing.T) {
 		history = append(history, models.Message{Role: role, Content: "Turn message " + strconv.Itoa(i)})
 	}
 
-	compiler := New(store, nil)
+	compiler := New(store)
 	prompt, err := compiler.Compile(ctx, Request{
 		SessionID:    sessionID,
 		Objective:    "Upgrade meal tracker to React",
@@ -149,7 +149,7 @@ func TestCompilerObservationInvalidationOnMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	compiler := New(store, nil)
+	compiler := New(store)
 
 	// 3. Compile context before mutation -> should include observation
 	prompt1, err := compiler.Compile(ctx, Request{
@@ -236,7 +236,7 @@ func TestCompilerWorkingMemoryCoexistsWithActivePlan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	compiler := New(store, nil)
+	compiler := New(store)
 	prompt, err := compiler.Compile(ctx, Request{
 		SessionID:    sessionID,
 		TaskID:       taskID,
@@ -280,7 +280,7 @@ func TestSWERequestUsesObservationFactNotToolBody(t *testing.T) {
 		{Role: models.RoleTool, Content: body, ToolCallID: "call-1", ToolName: "read_file"},
 	}
 
-	prompt, err := New(store, nil).Compile(ctx, Request{
+	prompt, err := New(store).Compile(ctx, Request{
 		SessionID: sessionID, TaskID: taskID, Objective: "Inspect page.tsx", Control: "control",
 		ContextLimit: 32000, PromptMetadata: models.PromptMetadata{Profile: "plan_research"},
 		History: history,
@@ -314,7 +314,7 @@ func TestSWEStallCompileOmitsRereadAndNamesStrategy(t *testing.T) {
 	if _, err := store.SaveDocument(ctx, state.DocumentInput{ID: "working-memory:" + sessionID + ":" + taskID, Kind: "working_memory", SessionID: sessionID, Status: "active", Payload: wmPayload}); err != nil {
 		t.Fatal(err)
 	}
-	prompt, err := New(store, nil).Compile(ctx, Request{
+	prompt, err := New(store).Compile(ctx, Request{
 		SessionID: sessionID, TaskID: taskID, Objective: "Research app", Control: "control", PlanStep: "Research the repository",
 		ContextLimit: 32000, PromptMetadata: models.PromptMetadata{Profile: "execution"},
 	})

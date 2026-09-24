@@ -24,34 +24,9 @@ func (i sessionItem) Title() string {
 func (i sessionItem) Description() string { return i.session.ID }
 func (i sessionItem) FilterValue() string { return i.session.Name + " " + i.session.ID }
 
-type checkpointItem struct{ checkpoint api.Checkpoint }
-
-func (i checkpointItem) Title() string {
-	return truncate(i.checkpoint.Action, 64)
-}
-func (i checkpointItem) Description() string {
-	label := fmt.Sprintf("%s · %d files", i.checkpoint.CreatedAt.Local().Format("Jan 02 15:04"), i.checkpoint.Files)
-	if i.checkpoint.Partial {
-		label += " · partial"
-	}
-	return label
-}
-func (i checkpointItem) FilterValue() string { return i.checkpoint.Action + " " + i.checkpoint.ID }
-
 type sessionsLoadedMsg struct {
 	sessions []api.Session
 	err      error
-}
-
-type conversationLoadedMsg struct {
-	session  api.Session
-	messages []api.Message
-	err      error
-}
-
-type checkpointsLoadedMsg struct {
-	checkpoints []api.Checkpoint
-	err         error
 }
 
 type sessionDeletedMsg struct {
@@ -60,9 +35,10 @@ type sessionDeletedMsg struct {
 	err       error
 }
 
-type rewindResultMsg struct {
-	result api.RewindResult
-	err    error
+type conversationLoadedMsg struct {
+	session  api.Session
+	messages []api.Message
+	err      error
 }
 
 type sideAnswerMsg struct {
@@ -80,23 +56,11 @@ func (m *Model) openSessionsOverlay(deleting bool) tea.Cmd {
 	if deleting {
 		m.surface = surfaceDeleteSession
 	}
-	m.overlayTarget, m.overlayCheckpoint = nil, nil
+	m.overlayTarget = nil
 	m.overlayConfirm, m.overlayForce, m.overlayError = false, false, ""
 	m.overlayList.Title = map[bool]string{true: "Delete chat session", false: "Switch chat session"}[deleting]
 	m.layout()
 	return loadSessionsCmd(m.ctx, m.client)
-}
-
-func (m *Model) openRewindOverlay() tea.Cmd {
-	m.paletteOpen = false
-	m.priorFocus, m.focus = m.focus, focusOverlay
-	m.input.Blur()
-	m.surface = surfaceRewind
-	m.overlayTarget, m.overlayCheckpoint = nil, nil
-	m.overlayConfirm, m.overlayForce, m.overlayError = false, false, ""
-	m.overlayList.Title = "Rewind checkpoint"
-	m.layout()
-	return loadCheckpointsCmd(m.ctx, m.client, m.session.ID)
 }
 
 func (m *Model) openSideOverlay(query string) tea.Cmd {
@@ -130,7 +94,7 @@ func (m *Model) openKryptonOverlay() tea.Cmd {
 
 func (m *Model) closeOverlay() tea.Cmd {
 	m.surface = surfaceNone
-	m.overlayTarget, m.overlayCheckpoint = nil, nil
+	m.overlayTarget = nil
 	m.overlayConfirm, m.overlayForce, m.overlayError = false, false, ""
 	m.sideLoading = false
 	m.overlayInput.Reset()
@@ -159,16 +123,6 @@ func loadConversationCmd(ctx context.Context, client api.Client, session api.Ses
 	}
 }
 
-func loadCheckpointsCmd(ctx context.Context, client api.Client, sessionID string) tea.Cmd {
-	return func() tea.Msg {
-		if client == nil {
-			return checkpointsLoadedMsg{err: errors.New("backend is unavailable")}
-		}
-		checkpoints, err := client.ListCheckpoints(ctx, api.SessionRequest{SessionID: sessionID})
-		return checkpointsLoadedMsg{checkpoints: checkpoints, err: err}
-	}
-}
-
 func deleteSessionCmd(ctx context.Context, client api.Client, target, current api.Session) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
@@ -182,16 +136,6 @@ func deleteSessionCmd(ctx context.Context, client api.Client, target, current ap
 		}
 		next, err := client.CreateSession(ctx, api.CreateSessionRequest{})
 		return sessionDeletedMsg{deletedID: target.ID, session: &next, err: err}
-	}
-}
-
-func rewindCmd(ctx context.Context, client api.Client, sessionID, checkpointID string, force bool) tea.Cmd {
-	return func() tea.Msg {
-		if client == nil {
-			return rewindResultMsg{err: errors.New("backend is unavailable")}
-		}
-		result, err := client.RewindSession(ctx, api.RewindRequest{SessionID: sessionID, Checkpoint: checkpointID, Force: force})
-		return rewindResultMsg{result: result, err: err}
 	}
 }
 
@@ -382,40 +326,7 @@ func (m Model) updateOverlayKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-	case surfaceRewind:
-		if m.overlayConfirm {
-			if m.overlayForce {
-				if msg.String() == "enter" || msg.Code == tea.KeyEnter {
-					if strings.TrimSpace(m.overlayInput.Value()) != "FORCE" {
-						m.overlayError = "Type FORCE exactly to overwrite post-checkpoint changes."
-						return m, nil
-					}
-					m.overlayError = ""
-					return m, rewindCmd(m.ctx, m.client, m.session.ID, m.overlayCheckpoint.ID, true)
-				}
-				var cmd tea.Cmd
-				m.overlayInput, cmd = m.overlayInput.Update(msg)
-				return m, cmd
-			}
-			if msg.String() == "enter" || msg.Code == tea.KeyEnter || msg.String() == "y" {
-				if m.overlayCheckpoint == nil {
-					return m, nil
-				}
-				return m, rewindCmd(m.ctx, m.client, m.session.ID, m.overlayCheckpoint.ID, false)
-			}
-			if msg.String() == "n" {
-				m.overlayConfirm, m.overlayCheckpoint = false, nil
-			}
-			return m, nil
-		}
-		if msg.String() == "enter" || msg.Code == tea.KeyEnter {
-			item, ok := m.overlayList.SelectedItem().(checkpointItem)
-			if ok {
-				selected := item.checkpoint
-				m.overlayCheckpoint, m.overlayConfirm = &selected, true
-			}
-			return m, nil
-		}
+
 	case surfaceSideQuestion:
 		if m.sideLoading {
 			return m, nil
@@ -472,23 +383,7 @@ func (m Model) overlayView() string {
 			content += "\n" + m.styles.Warning.Render(m.overlayError)
 		}
 		return components.Card(m.styles.Modal, width, "", content)
-	case surfaceRewind:
-		if m.overlayConfirm && m.overlayCheckpoint != nil {
-			if m.overlayForce {
-				body := "Files changed after this checkpoint.\n\n" + m.overlayInput.View()
-				if m.overlayError != "" {
-					body += "\n" + m.styles.Error.Render(m.overlayError)
-				}
-				return components.Card(m.styles.Modal, width, m.styles.Error.Render("REWIND CONFLICT"), body)
-			}
-			body := truncate(m.overlayCheckpoint.Action, 72) + fmt.Sprintf("\n%d covered files", m.overlayCheckpoint.Files)
-			return components.Card(m.styles.Modal, width, m.styles.Warning.Render("REWIND CHECKPOINT"), body)
-		}
-		content := m.overlayList.View()
-		if m.overlayError != "" {
-			content += "\n" + m.styles.Warning.Render(m.overlayError)
-		}
-		return components.Card(m.styles.Modal, width, "", content)
+
 	case surfaceSideQuestion:
 		content := []string{m.styles.Muted.Render("Answers use this chat only. No tools or workspace changes."), m.overlayInput.View()}
 		if m.sideLoading {

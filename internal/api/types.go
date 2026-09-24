@@ -22,8 +22,7 @@ type Client interface {
 	DeleteSession(context.Context, string) error
 	ClearSession(context.Context, SessionRequest) (SessionSnapshot, error)
 	ResetSession(context.Context, SessionRequest) (SessionSnapshot, error)
-	ListCheckpoints(context.Context, SessionRequest) ([]Checkpoint, error)
-	RewindSession(context.Context, RewindRequest) (RewindResult, error)
+
 	AnswerSideQuestion(context.Context, SideQuestionRequest) (SideQuestionResult, error)
 	GetArtifact(context.Context, ArtifactRequest) (Artifact, error)
 	ListModels(context.Context, ListModelsRequest) (ModelCatalog, error)
@@ -61,35 +60,35 @@ type EventStream interface {
 }
 
 const (
-	EventUserMessage         = "user/message"
-	EventAssistantMessage    = "assistant/message"
-	EventToolResult          = "tool/result"
-	EventTurnStart           = "turn/start"
-	EventTurnEnd             = "turn/end"
-	EventStepStart           = "step/start"
-	EventStepEnd             = "step/end"
-	EventAssistantChunk      = "assistant/chunk"
-	EventUsage               = "usage"
-	EventFinish              = "finish"
-	EventError               = "error"
-	EventRetry               = "retry"
-	EventToolCall            = "tool/call"
-	EventTodoWrite           = "todo/write"
-	EventPlanMode            = "plan/mode"
-	EventRunQueued           = "run/message.queued"
-	EventRunStart            = "run/start"
-	EventRunEnd              = "run/end"
-	EventInteractionRequest  = "interaction/requested"
-	EventInteractionResolve  = "interaction/resolved"
-	EventCheckpointAvailable = "checkpoint.available"
-	EventArtifactAvailable   = "artifact.created"
-	EventSessionCreated      = "session.created"
-	EventSessionUpdated      = "session.updated"
-	EventSessionArchived     = "session.archived"
-	EventSubagentDescriptor  = "subagent/descriptor"
-	EventSubagentQueued      = "subagent/message.queued"
-	EventSubagentRunStart    = "subagent/run.start"
-	EventSubagentRunEnd      = "subagent/run.end"
+	EventUserMessage        = "user/message"
+	EventAssistantMessage   = "assistant/message"
+	EventToolResult         = "tool/result"
+	EventTurnStart          = "turn/start"
+	EventTurnEnd            = "turn/end"
+	EventStepStart          = "step/start"
+	EventStepEnd            = "step/end"
+	EventAssistantChunk     = "assistant/chunk"
+	EventUsage              = "usage"
+	EventFinish             = "finish"
+	EventError              = "error"
+	EventRetry              = "retry"
+	EventToolCall           = "tool/call"
+	EventTodoWrite          = "todo/write"
+	EventPlanMode           = "plan/mode"
+	EventRunQueued          = "run/message.queued"
+	EventRunStart           = "run/start"
+	EventRunEnd             = "run/end"
+	EventInteractionRequest = "interaction/requested"
+	EventInteractionResolve = "interaction/resolved"
+
+	EventArtifactAvailable  = "artifact.created"
+	EventSessionCreated     = "session.created"
+	EventSessionUpdated     = "session.updated"
+	EventSessionArchived    = "session.archived"
+	EventSubagentDescriptor = "subagent/descriptor"
+	EventSubagentQueued     = "subagent/message.queued"
+	EventSubagentRunStart   = "subagent/run.start"
+	EventSubagentRunEnd     = "subagent/run.end"
 )
 
 type ErrorCode string
@@ -202,8 +201,8 @@ type Session struct {
 	ParentSessionID string    `json:"parent_session_id,omitempty"`
 	Origin          string    `json:"origin,omitempty"`
 	Checklist       bool      `json:"checklist"`
-	Rewind          bool      `json:"rewind"`
-	ProviderRetry   bool      `json:"provider_retry"`
+
+	ProviderRetry bool `json:"provider_retry"`
 }
 
 type SessionMetadata struct {
@@ -216,9 +215,9 @@ type SessionMetadata struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-func (s Session) PlanModeActive() bool       { return s.PlanMode }
-func (s Session) ChecklistEnabled() bool     { return s.Checklist }
-func (s Session) RewindEnabled() bool        { return s.Rewind }
+func (s Session) PlanModeActive() bool   { return s.PlanMode }
+func (s Session) ChecklistEnabled() bool { return s.Checklist }
+
 func (s Session) ResponseRetryEnabled() bool { return s.ProviderRetry }
 
 type MessagePart struct {
@@ -292,44 +291,12 @@ type UpdateSessionRequest struct {
 	DryRun           *bool   `json:"dry_run,omitempty"`
 	PlanMode         *bool   `json:"plan_mode,omitempty"`
 	Checklist        *bool   `json:"checklist,omitempty"`
-	Rewind           *bool   `json:"rewind,omitempty"`
-	ProviderRetry    *bool   `json:"provider_retry,omitempty"`
+
+	ProviderRetry *bool `json:"provider_retry,omitempty"`
 }
 
 type SessionRequest struct {
 	SessionID string `json:"session_id"`
-}
-
-type CheckpointWarning struct {
-	Path   string `json:"path,omitempty"`
-	Reason string `json:"reason"`
-}
-
-type Checkpoint struct {
-	ID        string              `json:"id"`
-	CreatedAt time.Time           `json:"created_at"`
-	Action    string              `json:"action"`
-	Files     int                 `json:"files"`
-	Partial   bool                `json:"partial,omitempty"`
-	Warnings  []CheckpointWarning `json:"warnings,omitempty"`
-}
-
-type CheckpointAvailable struct {
-	Tool       string     `json:"tool"`
-	Checkpoint Checkpoint `json:"checkpoint"`
-}
-
-type RewindRequest struct {
-	SessionID  string `json:"session_id"`
-	Checkpoint string `json:"checkpoint_id"`
-	Force      bool   `json:"force,omitempty"`
-}
-
-type RewindResult struct {
-	Restored int                 `json:"restored"`
-	Partial  bool                `json:"partial,omitempty"`
-	Warnings []CheckpointWarning `json:"warnings,omitempty"`
-	Backup   *Checkpoint         `json:"backup,omitempty"`
 }
 
 type SideQuestionRequest struct {

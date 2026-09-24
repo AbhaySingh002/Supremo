@@ -161,22 +161,6 @@ func (m *RuntimeManager) ReadAllTranscript(ctx context.Context, sessionID string
 	return runtime.ReadAllTranscript(ctx, sessionID)
 }
 
-func (m *RuntimeManager) Checkpoints(root, sessionID string) ([]tools.CheckpointSummary, error) {
-	runtime, err := m.For(sessionID)
-	if err != nil {
-		return nil, err
-	}
-	return runtime.Checkpoints(root, sessionID)
-}
-
-func (m *RuntimeManager) Rewind(ctx context.Context, root, sessionID, checkpointID string, force bool) (tools.RewindResult, error) {
-	runtime, err := m.For(sessionID)
-	if err != nil {
-		return tools.RewindResult{}, err
-	}
-	return runtime.Rewind(ctx, root, sessionID, checkpointID, force)
-}
-
 func (m *RuntimeManager) DeleteSession(ctx context.Context, root, sessionID string) error {
 	runtime, err := m.For(sessionID)
 	if err != nil {

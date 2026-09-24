@@ -243,6 +243,10 @@ func (m *SubagentManager) Wait(ctx context.Context, parentID, childID, messageID
 		return SubagentRun{}, err
 	}
 	for {
+		m.mu.Lock()
+		updates := m.updateChannelLocked(childID)
+		m.mu.Unlock()
+
 		records, err := sessionlog.Load(ctx, m.store, childID)
 		if err != nil {
 			return SubagentRun{}, err
@@ -265,7 +269,6 @@ func (m *SubagentManager) Wait(ctx context.Context, parentID, childID, messageID
 			m.mu.Unlock()
 			return SubagentRun{}, failure
 		}
-		updates := m.updateChannelLocked(childID)
 		m.mu.Unlock()
 		select {
 		case <-ctx.Done():

@@ -438,21 +438,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setStatus("Switched to " + msg.session.Name + ".")
 		}
 		return m, m.renderMarkdown()
-	case checkpointsLoadedMsg:
-		if msg.err != nil {
-			m.surface = surfaceNone
-			m.appendEntry(entryError, "load checkpoints: "+msg.err.Error())
-			m.layout()
-			return m, m.input.Focus()
-		}
-		items := make([]list.Item, 0, len(msg.checkpoints))
-		for _, checkpoint := range msg.checkpoints {
-			items = append(items, checkpointItem{checkpoint: checkpoint})
-		}
-		if len(items) == 0 {
-			m.overlayError = "No checkpoints are available for this chat."
-		}
-		return m, m.overlayList.SetItems(items)
 	case sessionDeletedMsg:
 		if msg.err != nil {
 			m.overlayError = msg.err.Error()
@@ -466,22 +451,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.appendEntry(entryStatus, "Deleted chat session "+msg.deletedID+".")
 		}
-		return m, m.closeOverlay()
-	case rewindResultMsg:
-		if msg.err != nil {
-			var conflict *api.Error
-			if errors.As(msg.err, &conflict) && conflict.Code == api.CodeConflict {
-				m.overlayForce = true
-				m.overlayError = "Workspace paths changed after this checkpoint."
-				m.input.Reset()
-				m.input.Placeholder = "Type FORCE to overwrite post-checkpoint changes"
-				return m, m.input.Focus()
-			}
-			m.overlayError = msg.err.Error()
-			return m, nil
-		}
-		m.surface = surfaceNone
-		m.appendEntry(entryStatus, fmt.Sprintf("Rewound %d files%s.", msg.result.Restored, map[bool]string{true: " (partial)", false: ""}[msg.result.Partial]))
 		return m, m.closeOverlay()
 	case sideAnswerMsg:
 		m.sideLoading = false
@@ -1360,10 +1329,7 @@ func (m Model) submitInput() (tea.Model, tea.Cmd) {
 		m.resetComposer()
 		return m, m.openSessionsOverlay(true)
 	}
-	if input == "/rewind" {
-		m.resetComposer()
-		return m, m.openRewindOverlay()
-	}
+
 	if strings.HasPrefix(input, "/side") {
 		query := strings.TrimSpace(strings.TrimPrefix(input, "/side"))
 		return m, m.openSideOverlay(query)
@@ -1501,13 +1467,6 @@ func (m *Model) applyProgress(event progressEvent) tea.Cmd {
 		}
 	case progressChecklist:
 		m.setTodos(event.Todos)
-	case progressCheckpoint:
-		if event.Checkpoint != nil {
-			m.appendEntry(entryStatus, "Checkpoint saved: "+event.Checkpoint.ID)
-		}
-		if event.Phase != "" {
-			m.phase = event.Phase
-		}
 	case progressPhase:
 		m.phase = event.Phase
 		message := event.Message

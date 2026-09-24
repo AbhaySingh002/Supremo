@@ -8,7 +8,6 @@ const (
 	ErrorClassToolExecution = "TOOL_EXECUTION_ERROR"
 	ErrorClassProvider      = "PROVIDER_ERROR"
 	ErrorClassPermission    = "PERMISSION_ERROR"
-	ErrorClassCheckpoint    = "CHECKPOINT_ERROR"
 )
 
 type ClassifiedError struct {

@@ -25,28 +25,28 @@ const (
 	Tasks               Kind = "tasks"
 	UX                  Kind = "ux"
 	SideQuestion        Kind = "side_question"
-	Rewind              Kind = "rewind"
-	Approve             Kind = "approve"
-	Deny                Kind = "deny"
-	DryRun              Kind = "dry_run"
-	ApprovalMode        Kind = "approval_mode"
-	Copy                Kind = "copy"
-	Export              Kind = "export"
-	Diff                Kind = "diff"
-	Cancel              Kind = "cancel"
-	Tools               Kind = "tools"
-	Activity            Kind = "activity"
-	Doctor              Kind = "doctor"
-	Exit                Kind = "exit"
-	Auth                Kind = "auth"
-	Provider            Kind = "provider"
-	Endpoint            Kind = "endpoint"
-	Models              Kind = "models"
-	Usage               Kind = "usage"
-	Model               Kind = "model"
-	Config              Kind = "config"
-	Context             Kind = "context"
-	Index               Kind = "index"
+
+	Approve      Kind = "approve"
+	Deny         Kind = "deny"
+	DryRun       Kind = "dry_run"
+	ApprovalMode Kind = "approval_mode"
+	Copy         Kind = "copy"
+	Export       Kind = "export"
+	Diff         Kind = "diff"
+	Cancel       Kind = "cancel"
+	Tools        Kind = "tools"
+	Activity     Kind = "activity"
+	Doctor       Kind = "doctor"
+	Exit         Kind = "exit"
+	Auth         Kind = "auth"
+	Provider     Kind = "provider"
+	Endpoint     Kind = "endpoint"
+	Models       Kind = "models"
+	Usage        Kind = "usage"
+	Model        Kind = "model"
+	Config       Kind = "config"
+	Context      Kind = "context"
+	Index        Kind = "index"
 )
 
 // Intent is a validated command request. Value carries a canonical alias
@@ -121,7 +121,7 @@ func standardCommands() []Command {
 		cmd("/tasks", "Show task and plan status", Tasks, exact(0)),
 		cmd("/ux", "Show or toggle agent UX features", UX, uxArgs),
 		cmd("/side", "Open a tool-free side question panel", SideQuestion, exact(0)),
-		cmd("/rewind", "Restore files from a checkpoint", Rewind, exact(0)),
+
 		cmd("/approve", "Approve the pending tool call", Approve, exact(0)),
 		cmd("/deny", "Deny the pending tool call", Deny, nil),
 		cmd("/dry-run", "Toggle dry run for mutating tools", DryRun, exact(0)),

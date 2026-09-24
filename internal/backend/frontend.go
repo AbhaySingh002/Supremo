@@ -15,7 +15,6 @@ import (
 	"github.com/AbhaySingh002/supremo/internal/agent"
 	"github.com/AbhaySingh002/supremo/internal/api"
 	"github.com/AbhaySingh002/supremo/internal/providers"
-	"github.com/AbhaySingh002/supremo/internal/repository"
 	"github.com/AbhaySingh002/supremo/internal/tools"
 )
 
@@ -35,9 +34,6 @@ func (s *Service) ResetSession(ctx context.Context, request api.SessionRequest) 
 	if _, err := s.ClearSession(ctx, request); err != nil {
 		return api.SessionSnapshot{}, err
 	}
-	if err := tools.ClearCheckpoints(s.workspace, request.SessionID); err != nil {
-		return api.SessionSnapshot{}, err
-	}
 	session, err := agent.LoadSession(s.workspace, request.SessionID)
 	if err != nil {
 		return api.SessionSnapshot{}, mapStateError(err, "session")
@@ -49,42 +45,6 @@ func (s *Service) ResetSession(ctx context.Context, request api.SessionRequest) 
 		return api.SessionSnapshot{}, err
 	}
 	return s.GetSession(ctx, request.SessionID)
-}
-
-func (s *Service) ListCheckpoints(_ context.Context, request api.SessionRequest) ([]api.Checkpoint, error) {
-	items, err := s.runtimes.Checkpoints(s.workspace, request.SessionID)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]api.Checkpoint, 0, len(items))
-	for _, item := range items {
-		result = append(result, checkpointDTO(item))
-	}
-	return result, nil
-}
-
-func (s *Service) RewindSession(ctx context.Context, request api.RewindRequest) (api.RewindResult, error) {
-	result, err := s.runtimes.Rewind(ctx, s.workspace, request.SessionID, request.Checkpoint, request.Force)
-	if err != nil {
-		return api.RewindResult{}, err
-	}
-	value := api.RewindResult{Restored: result.Restored, Partial: result.Partial}
-	for _, warning := range result.Warnings {
-		value.Warnings = append(value.Warnings, api.CheckpointWarning{Path: warning.Path, Reason: warning.Reason})
-	}
-	if result.Backup != nil {
-		backup := checkpointDTO(*result.Backup)
-		value.Backup = &backup
-	}
-	return value, nil
-}
-
-func checkpointDTO(item tools.CheckpointSummary) api.Checkpoint {
-	value := api.Checkpoint{ID: item.ID, CreatedAt: item.CreatedAt, Action: item.Action, Files: item.Files, Partial: item.Partial}
-	for _, warning := range item.Warnings {
-		value.Warnings = append(value.Warnings, api.CheckpointWarning{Path: warning.Path, Reason: warning.Reason})
-	}
-	return value
 }
 
 func (s *Service) AnswerSideQuestion(ctx context.Context, request api.SideQuestionRequest) (api.SideQuestionResult, error) {
@@ -170,15 +130,6 @@ func (s *Service) ConfigureEmbeddings(_ context.Context, request api.ConfigureEm
 	if err := s.providers.UpdateEmbeddingSettings(request.CredentialProvider, request.Endpoint, request.Model); err != nil {
 		return err
 	}
-	settings, err := s.providers.EmbeddingSettings()
-	if err != nil {
-		return err
-	}
-	var provider repository.EmbeddingProvider
-	if settings.Endpoint != "" && settings.Model != "" && settings.APIKey != "" {
-		provider = repository.OpenAICompatibleEmbeddings{Endpoint: settings.Endpoint, ModelName: settings.Model, APIKey: settings.APIKey}
-	}
-	s.repository.SetEmbeddingProvider(provider)
 	return nil
 }
 
@@ -325,23 +276,11 @@ func (s *Service) ContextStatus(ctx context.Context, request api.ContextStatusRe
 }
 
 func (s *Service) IndexStatus(ctx context.Context) (api.IndexStatus, error) {
-	settings, configured, err := s.repository.SemanticStatus(ctx)
-	if err != nil {
-		return api.IndexStatus{}, err
-	}
-	ready, dirty, indexErr := s.repository.Status()
-	result := api.IndexStatus{Ready: ready, Dirty: dirty, Semantic: settings.Enabled, Configured: configured}
-	if indexErr != nil {
-		result.Error = indexErr.Error()
-	}
-	return result, nil
+	return api.IndexStatus{}, nil
 }
 
 func (s *Service) UpdateIndex(ctx context.Context, request api.UpdateIndexRequest) (api.IndexStatus, error) {
-	if err := s.repository.SetSemantic(ctx, request.Semantic); err != nil {
-		return api.IndexStatus{}, err
-	}
-	return s.IndexStatus(ctx)
+	return api.IndexStatus{}, nil
 }
 
 func (s *Service) InitializeWorkspace(ctx context.Context) (api.WorkspaceStatus, error) {

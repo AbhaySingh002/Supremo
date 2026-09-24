@@ -163,7 +163,7 @@ func setPlanModeCmd(ctx context.Context, client api.Client, session api.Session,
 
 func backendIntent(kind commands.Kind) bool {
 	switch kind {
-	case commands.Help, commands.Copy, commands.Exit, commands.Krypton, commands.Diff, commands.SideQuestion, commands.Rewind, commands.Approve, commands.Deny:
+	case commands.Help, commands.Copy, commands.Exit, commands.Krypton, commands.Diff, commands.SideQuestion, commands.Approve, commands.Deny:
 		return false
 	default:
 		return true
@@ -265,7 +265,7 @@ func executeSessionIntent(ctx context.Context, client api.Client, result command
 
 func executeUXIntent(ctx context.Context, client api.Client, result commandResultMsg) commandResultMsg {
 	if len(result.intent.Args) < 2 {
-		result.output = fmt.Sprintf("Agent UX:\n  checklist: %s\n  rewind: %s\n  provider retry: %s", onOff(result.session.Checklist), onOff(result.session.Rewind), onOff(result.session.ProviderRetry))
+		result.output = fmt.Sprintf("Agent UX:\n  checklist: %s\n  provider retry: %s", onOff(result.session.Checklist), onOff(result.session.ProviderRetry))
 		return result
 	}
 	enabled := result.intent.Args[1] == "on"
@@ -273,8 +273,7 @@ func executeUXIntent(ctx context.Context, client api.Client, result commandResul
 	switch result.intent.Args[0] {
 	case "checklist":
 		request.Checklist = &enabled
-	case "rewind":
-		request.Rewind = &enabled
+
 	case "retry":
 		request.ProviderRetry = &enabled
 	}

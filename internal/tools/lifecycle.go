@@ -16,7 +16,6 @@ type Lifecycle struct {
 	Access     ToolAccess
 	SideEffect ToolSideEffect
 	Family     string
-	Checkpoint *CheckpointSummary
 }
 
 type LifecycleEnrichment struct {

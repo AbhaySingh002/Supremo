@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,9 +12,7 @@ import (
 // workspace while preserving provider configuration.
 func RemoveWorkspaceState(root string) error {
 	_ = state.CloseWorkspace(root)
-	if workspaceID, err := state.ResolveWorkspaceIdentity(context.Background(), root); err == nil && workspaceID != "" {
-		_ = os.RemoveAll(state.WorkspaceDir(workspaceID))
-	}
+
 	for _, name := range []string{".session", ".sessions", ".scratchpad"} {
 		if err := os.RemoveAll(filepath.Join(root, name)); err != nil {
 			return fmt.Errorf("remove %s: %w", name, err)

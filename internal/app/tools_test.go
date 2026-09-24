@@ -27,7 +27,7 @@ func TestBuiltinToolsetIsMinimalAndPlanSafe(t *testing.T) {
 		registered = append(registered, descriptor.Name)
 	}
 	sort.Strings(registered)
-	want := []string{"ask_user_question", "delete_file", "execute_command", "exit_plan_mode", "glob", "grep", "interrupt_agent", "list_agents", "read_file", "rename_file", "replace_in_file", "send_message", "subagent", "todo_write", "wait_agent", "web_fetch", "write_file"}
+	want := []string{"ask_user_question", "delete_file", "execute_command", "exit_plan_mode", "interrupt_agent", "list_agents", "read_file", "rename_file", "replace_in_file", "send_message", "subagent", "todo_write", "wait_agent", "web_fetch", "write_file"}
 	if len(registered) != len(want) {
 		t.Fatalf("registered tools = %v, want %v", registered, want)
 	}
@@ -38,7 +38,7 @@ func TestBuiltinToolsetIsMinimalAndPlanSafe(t *testing.T) {
 	}
 	for _, removed := range []string{
 		"create_directory", "discover_tools", "file_info", "find_references", "find_symbol", "git_diff", "git_log", "git_status",
-		"list_directory", "repository_query", "search_file_name", "search_text",
+		"list_directory", "repository_query", "search_file_name", "search_text", "glob", "grep",
 	} {
 		if _, ok := catalog.Descriptor(removed); ok {
 			t.Fatalf("removed tool %q is still registered", removed)
@@ -53,7 +53,7 @@ func TestBuiltinToolsetIsMinimalAndPlanSafe(t *testing.T) {
 			t.Fatalf("unsafe tool exposed in Plan Mode: %#v", candidate.Tool)
 		}
 	}
-	for _, required := range []string{"ask_user_question", "exit_plan_mode", "glob", "grep", "list_agents", "read_file", "subagent", "wait_agent"} {
+	for _, required := range []string{"ask_user_question", "exit_plan_mode", "list_agents", "read_file", "subagent", "wait_agent"} {
 		if !visible[required] {
 			t.Fatalf("Plan Mode missing %q: %#v", required, route)
 		}

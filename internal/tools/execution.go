@@ -293,16 +293,15 @@ type Activity struct {
 
 // Event is a UI-facing tool lifecycle notification.
 type Event struct {
-	Time       time.Time
-	SessionID  string
-	TaskID     string
-	Tool       string
-	Status     string
-	Message    string
-	Arguments  string
-	Output     string
-	Diff       string
-	Checkpoint *CheckpointSummary
+	Time      time.Time
+	SessionID string
+	TaskID    string
+	Tool      string
+	Status    string
+	Message   string
+	Arguments string
+	Output    string
+	Diff      string
 }
 
 func renderToolCall(name string, input any) string {

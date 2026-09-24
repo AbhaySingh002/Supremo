@@ -13,7 +13,7 @@ import (
 	"github.com/AbhaySingh002/supremo/internal/sessionlog"
 	"github.com/AbhaySingh002/supremo/internal/state"
 	"github.com/AbhaySingh002/supremo/internal/tools"
-	"github.com/AbhaySingh002/supremo/internal/tools/search"
+	"github.com/AbhaySingh002/supremo/internal/tools/filesystem"
 )
 
 func TestDurableMemoryRoundTripsNativeToolCallsWithoutReparsingText(t *testing.T) {
@@ -95,15 +95,15 @@ func TestObservationCacheHitRestoresFullContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	registry := tools.NewRegistry()
-	if err := registry.Register(&search.Glob{}); err != nil {
+	if err := registry.Register(&filesystem.ReadFile{}); err != nil {
 		t.Fatal(err)
 	}
 	agent := &Agent{workspace: tempDir, toolManager: tools.NewManager(registry), hooks: observationHooks(tempDir)}
 	ctx := tools.WithLifecycleRecorder(tools.WithWorkspace(context.Background(), tempDir), &stateRecorder{store: store, root: tempDir, sessionID: "sess-cache"})
 	call := models.ToolCall{
-		ID:        "call-glob-1",
-		Name:      "glob",
-		Arguments: json.RawMessage(`{"path":".","pattern":"sample.txt"}`),
+		ID:        "call-read-1",
+		Name:      "read_file",
+		Arguments: json.RawMessage(`{"path":"sample.txt"}`),
 	}
 	sum1 := agent.executeAll(ctx, &Session{ID: "sess-cache"}, []models.ToolCall{call}, ToolExecutionOptions{TaskID: "task-cache"})
 	if sum1.Err != nil {

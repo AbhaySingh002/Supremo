@@ -29,7 +29,7 @@ func TestPlanModeContextBuilderInjectsPolicy(t *testing.T) {
 
 	builder, err := agent.NewRealContextBuilder(
 		tools.NewRegistry(),
-		contextcompiler.New(store, nil),
+		contextcompiler.New(store),
 		func() int { return 32768 },
 	)
 	if err != nil {

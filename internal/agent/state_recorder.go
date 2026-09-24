@@ -10,17 +10,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AbhaySingh002/supremo/internal/repository"
 	"github.com/AbhaySingh002/supremo/internal/sessionlog"
 	"github.com/AbhaySingh002/supremo/internal/state"
 	"github.com/AbhaySingh002/supremo/internal/tools"
 )
 
 type stateRecorder struct {
-	store      *state.Store
-	repository *repository.Service
-	root       string
-	sessionID  string
+	store     *state.Store
+	root      string
+	sessionID string
 }
 
 func (r *stateRecorder) RecordToolLifecycle(ctx context.Context, lifecycle tools.Lifecycle) tools.LifecycleEnrichment {
@@ -28,9 +26,7 @@ func (r *stateRecorder) RecordToolLifecycle(ctx context.Context, lifecycle tools
 	// Use a live context so cancellation still leaves a durable explanation.
 	ctx = context.WithoutCancel(ctx)
 	payload := map[string]any{"tool": lifecycle.Tool, "status": lifecycle.Status, "arguments": lifecycle.Arguments}
-	if lifecycle.Checkpoint != nil {
-		payload["checkpoint"] = lifecycle.Checkpoint
-	}
+
 	if lifecycle.Error != nil {
 		payload["error"] = lifecycle.Error.Error()
 	}
@@ -101,13 +97,8 @@ func (r *stateRecorder) RecordToolLifecycle(ctx context.Context, lifecycle tools
 			r.observePath(ctx, path, lifecycle.Access, lifecycle.Status, revision.ID, event.ID)
 		}
 	}
-	if lifecycle.Family == "shell" && r.repository != nil {
-		r.repository.MarkDirty()
-		_, _ = r.repository.Scan(ctx)
-	}
 	if lifecycle.Family == "terminal" && strings.Contains(lifecycle.Tool, "test") {
-		status := lifecycle.Status
-		_, _ = r.store.SaveDocument(ctx, state.DocumentInput{ID: "test-" + event.ID, Kind: "test", SessionID: r.sessionID, Status: status, Payload: mustJSON(payload), Provenance: state.Provenance{SourceEventID: event.ID, Authority: state.AuthorityRuntime, WorkspaceRevisionID: revision.ID, ObservedAt: time.Now().UTC()}})
+		_, _ = r.store.SaveDocument(ctx, state.DocumentInput{ID: "test-" + event.ID, Kind: "test", SessionID: r.sessionID, Status: lifecycle.Status, Payload: mustJSON(payload), Provenance: state.Provenance{SourceEventID: event.ID, Authority: state.AuthorityRuntime, WorkspaceRevisionID: revision.ID, ObservedAt: time.Now().UTC()}})
 	}
 	if lifecycle.Status == "failed" {
 		_, _ = r.store.SaveDocument(ctx, state.DocumentInput{ID: "error-" + event.ID, Kind: "error", SessionID: r.sessionID, Status: "active", Payload: mustJSON(payload), Provenance: state.Provenance{SourceEventID: event.ID, Authority: state.AuthorityRuntime, WorkspaceRevisionID: revision.ID, ObservedAt: time.Now().UTC()}})
@@ -133,11 +124,6 @@ func (r *stateRecorder) observePath(ctx context.Context, path string, access too
 		eventType = "file.modified"
 	}
 	event := state.EventInput{SessionID: r.sessionID, CausationID: eventID, Type: eventType}
-	if r.repository != nil {
-		if err := r.repository.IndexPath(ctx, path, revisionID, event); err == nil {
-			return
-		}
-	}
 	_, _ = r.store.ObserveFile(ctx, state.FileObservation{Path: path, Data: data, Deleted: deleted, WorkspaceRevisionID: revisionID, Event: event})
 }
 

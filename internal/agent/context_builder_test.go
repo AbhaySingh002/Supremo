@@ -43,7 +43,7 @@ func TestRealContextBuilderRecordsPromptCompilerMetadata(t *testing.T) {
 	if err := session.Save(root); err != nil {
 		t.Fatal(err)
 	}
-	builder := &RealContextBuilder{registry: tools.NewRegistry(), compiler: contextcompiler.New(store, nil), contextLimit: func() int { return 32768 }}
+	builder := &RealContextBuilder{registry: tools.NewRegistry(), compiler: contextcompiler.New(store), contextLimit: func() int { return 32768 }}
 	prompt, err := builder.Compile(context.Background(), ContextRequest{Session: session, Objective: "Plan safely", Mode: tools.ToolModeSide, Profile: protocol.Execution})
 	if err != nil {
 		t.Fatal(err)

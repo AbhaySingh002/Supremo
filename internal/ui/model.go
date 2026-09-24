@@ -122,7 +122,6 @@ const (
 	surfaceNone surfaceKind = iota
 	surfaceSessions
 	surfaceDeleteSession
-	surfaceRewind
 	surfaceSideQuestion
 	surfaceKrypton
 	surfaceProvider
@@ -143,16 +142,15 @@ const (
 )
 
 type activityEvent struct {
-	Time       time.Time
-	SessionID  string
-	TaskID     string
-	Tool       string
-	Status     string
-	Message    string
-	Arguments  string
-	Output     string
-	Diff       string
-	Checkpoint *api.Checkpoint
+	Time      time.Time
+	SessionID string
+	TaskID    string
+	Tool      string
+	Status    string
+	Message   string
+	Arguments string
+	Output    string
+	Diff      string
 }
 
 // Options contains frontend-host behavior that cannot travel over the backend
@@ -228,16 +226,16 @@ type surfaceState struct {
 	credential           *credentialSetup
 	surface              surfaceKind
 	overlayTarget        *api.Session
-	overlayCheckpoint    *api.Checkpoint
-	overlayConfirm       bool
-	overlayForce         bool
-	overlayError         string
-	sideAnswer           string
-	sideLoading          bool
-	focus                focusTarget
-	priorFocus           focusTarget
-	planQuestion         *plan.PlanQuestionModel
-	pendingInteraction   string
+
+	overlayConfirm     bool
+	overlayForce       bool
+	overlayError       string
+	sideAnswer         string
+	sideLoading        bool
+	focus              focusTarget
+	priorFocus         focusTarget
+	planQuestion       *plan.PlanQuestionModel
+	pendingInteraction string
 }
 
 // Model is Supremo's root Bubble Tea model.
@@ -487,7 +485,7 @@ func New(client api.Client, workspace, sessionID string, options Options) Model 
 	if strings.TrimSpace(sessionID) == "" {
 		sessionID = fmt.Sprintf("ephemeral-%d", time.Now().UnixNano())
 	}
-	session := api.Session{ID: sessionID, Name: sessionID, ApprovalMode: "batman", Checklist: true, Rewind: true, ProviderRetry: true}
+	session := api.Session{ID: sessionID, Name: sessionID, ApprovalMode: "batman", Checklist: true, ProviderRetry: true}
 	styles := rendering.NewStyles()
 	input := textarea.New()
 	input.Prompt = "> "
@@ -545,7 +543,7 @@ func New(client api.Client, workspace, sessionID string, options Options) Model 
 	overlayList.Styles.TitleBar = styles.PaletteTitleBar
 	overlayList.Styles.Title = styles.PaletteTitle
 	overlayList.Styles.NoItems = styles.Muted
-	activitySpinner := spinner.MiniDot
+	activitySpinner := spinner.Jump
 	if styles.Ascii {
 		activitySpinner = spinner.Line
 	}

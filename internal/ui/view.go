@@ -180,9 +180,7 @@ func (m Model) inputView() string {
 
 	mode := m.ApprovalModeView()
 	statusLine := mode
-	if m.active != nil {
-		statusLine = m.spinner.View() + " " + m.phase
-	} else if layout := m.composerLayout(); len(layout.rows) > layout.visibleRows {
+	if layout := m.composerLayout(); len(layout.rows) > layout.visibleRows {
 		scrollHint := fmt.Sprintf(" · lines %d–%d of %d", layout.scrollRow+1, min(len(layout.rows), layout.scrollRow+layout.visibleRows), len(layout.rows))
 		statusLine += m.styles.Muted.Render(scrollHint)
 	} else {

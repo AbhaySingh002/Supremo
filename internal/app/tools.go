@@ -9,7 +9,6 @@ import (
 	"github.com/AbhaySingh002/supremo/internal/tools"
 	"github.com/AbhaySingh002/supremo/internal/tools/filesystem"
 	"github.com/AbhaySingh002/supremo/internal/tools/interaction"
-	"github.com/AbhaySingh002/supremo/internal/tools/search"
 	subagenttools "github.com/AbhaySingh002/supremo/internal/tools/subagent"
 	"github.com/AbhaySingh002/supremo/internal/tools/terminal"
 	"github.com/AbhaySingh002/supremo/internal/tools/web"
@@ -25,8 +24,6 @@ func registerBuiltinTools(registry *tools.Registry) error {
 		{&filesystem.ReplaceInFile{}, writeFS("replace_in_file", true)},
 		{&filesystem.RenameFile{}, writeFS("rename_file", true)},
 		{&filesystem.DeleteFile{}, tools.ToolMetadata{CanonicalName: "delete_file", Family: "filesystem", CapabilityTags: []string{"filesystem.write", "delete", "remove", "clean"}, Access: tools.ToolAccessDestructive, SideEffect: tools.ToolSideEffectWorkspace, RequiresApproval: true}},
-		{&search.Glob{}, inspectRepo("glob")},
-		{&search.Grep{}, inspectRepo("grep")},
 		{&terminal.ExecuteCommand{}, tools.ToolMetadata{CanonicalName: "execute_command", Family: "shell", CapabilityTags: []string{"shell.execute", "terminal", "command", "exec", "run", "open", "launch", "start", "serve", "process", "browse", "preview"}, Access: tools.ToolAccessDestructive, SideEffect: tools.ToolSideEffectProcess, RequiresApproval: true}},
 		{&web.WebFetch{}, tools.ToolMetadata{CanonicalName: "web_fetch", Family: "web", CapabilityTags: []string{"web.search", "fetch", "http", "url", "download"}, Access: tools.ToolAccessRead, SideEffect: tools.ToolSideEffectNetwork, ParallelSafe: true}},
 		{&tools.TodoWrite{}, tools.ToolMetadata{CanonicalName: "todo_write", Family: "task", CapabilityTags: []string{"task", "todo", "checklist"}, Access: tools.ToolAccessWrite, SideEffect: tools.ToolSideEffectWorkspace}},
@@ -90,8 +87,4 @@ func inspectFS(name string, inspection, persist bool) tools.ToolMetadata {
 
 func writeFS(name string, batmanManifest bool) tools.ToolMetadata {
 	return tools.ToolMetadata{CanonicalName: name, Family: "filesystem", CapabilityTags: []string{"filesystem.write", "write", "create", "edit", "update", "modify", "save"}, Access: tools.ToolAccessWrite, SideEffect: tools.ToolSideEffectWorkspace, RequiresApproval: true, BatmanManifest: batmanManifest}
-}
-
-func inspectRepo(name string) tools.ToolMetadata {
-	return tools.ToolMetadata{CanonicalName: name, Family: "repository", CapabilityTags: []string{"repository.search", "search", "find", "grep", "glob"}, Access: tools.ToolAccessRead, Inspection: true, PersistCallObservation: true, ParallelSafe: true}
 }

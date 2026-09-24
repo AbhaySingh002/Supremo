@@ -121,12 +121,7 @@ func (c *Client) ClearSession(ctx context.Context, value api.SessionRequest) (ap
 func (c *Client) ResetSession(ctx context.Context, value api.SessionRequest) (api.SessionSnapshot, error) {
 	return rpcCall[api.SessionSnapshot](ctx, c, "session.reset", "", value)
 }
-func (c *Client) ListCheckpoints(ctx context.Context, value api.SessionRequest) ([]api.Checkpoint, error) {
-	return rpcCall[[]api.Checkpoint](ctx, c, "checkpoint.list", "", value)
-}
-func (c *Client) RewindSession(ctx context.Context, value api.RewindRequest) (api.RewindResult, error) {
-	return rpcCall[api.RewindResult](ctx, c, "checkpoint.rewind", "", value)
-}
+
 func (c *Client) AnswerSideQuestion(ctx context.Context, value api.SideQuestionRequest) (api.SideQuestionResult, error) {
 	return rpcCall[api.SideQuestionResult](ctx, c, "side.answer", "", value)
 }

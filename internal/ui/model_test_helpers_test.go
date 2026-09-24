@@ -9,7 +9,7 @@ import (
 type sessionTestClient struct{ api.Client }
 
 func (sessionTestClient) UpdateSession(_ context.Context, request api.UpdateSessionRequest) (api.Session, error) {
-	session := api.Session{ID: request.SessionID, Revision: request.ExpectedRevision + 1, ApprovalMode: "batman", Checklist: true, Rewind: true, ProviderRetry: true}
+	session := api.Session{ID: request.SessionID, Revision: request.ExpectedRevision + 1, ApprovalMode: "batman", Checklist: true, ProviderRetry: true}
 	if request.ApprovalMode != nil {
 		session.ApprovalMode = *request.ApprovalMode
 	}

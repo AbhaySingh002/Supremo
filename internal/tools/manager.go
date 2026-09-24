@@ -207,22 +207,7 @@ func (m *Manager) Execute(
 	}
 	arguments = renderToolCall(name, input)
 	change := captureFileChange(ctx, desc, input)
-	checkpoint, err := beginCheckpoint(ctx, desc, input)
-	if err != nil {
-		logging.Error("Tool checkpoint failed (tool=%s): %v", name, err)
-		m.record(ctx, name, "failed", err.Error(), arguments, "")
-		recordLifecycle(ctx, Lifecycle{Tool: name, Status: "failed", Input: input, Error: err, Arguments: arguments})
-		return nil, err
-	}
-	if checkpoint != nil {
-		defer func() {
-			if summary := checkpoint.finish(); summary != nil {
-				logging.Info("Tool checkpoint created (tool=%s summary=%+v)", name, summary)
-				recordLifecycle(ctx, Lifecycle{Tool: name, Status: "checkpoint", Checkpoint: summary})
-				m.recordEvent(ctx, Event{Time: time.Now().UTC(), Tool: name, Status: "checkpoint", Checkpoint: summary})
-			}
-		}()
-	}
+
 	logging.Info("Tool execution starting (tool=%s args=%s)", name, arguments)
 	m.recordEvent(ctx, Event{Time: time.Now().UTC(), Tool: name, Status: "running", Arguments: arguments})
 	recordLifecycle(ctx, Lifecycle{Tool: name, Status: "called", Input: input, Arguments: arguments, Access: desc.Access, SideEffect: desc.SideEffect, Family: desc.Family})
@@ -416,11 +401,9 @@ func (m *Manager) recordEvent(ctx context.Context, event Event) {
 	scope := ProgressScopeFromContext(ctx)
 	event.SessionID, event.TaskID = scope.SessionID, scope.TaskID
 	m.mu.Lock()
-	if event.Checkpoint == nil {
-		m.activity = append(m.activity, Activity{Time: event.Time, Tool: event.Tool, Status: event.Status, Message: event.Message})
-		if len(m.activity) > 50 {
-			m.activity = m.activity[len(m.activity)-50:]
-		}
+	m.activity = append(m.activity, Activity{Time: event.Time, Tool: event.Tool, Status: event.Status, Message: event.Message})
+	if len(m.activity) > 50 {
+		m.activity = m.activity[len(m.activity)-50:]
 	}
 	report := m.report
 	m.mu.Unlock()

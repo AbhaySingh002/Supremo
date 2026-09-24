@@ -164,6 +164,6 @@ func frontendEvent(kind string) bool {
 		return true
 	default:
 		return kind == api.EventSessionCreated || kind == api.EventSessionUpdated || kind == api.EventSessionArchived ||
-			kind == api.EventCheckpointAvailable || kind == api.EventArtifactAvailable
+			kind == api.EventArtifactAvailable
 	}
 }

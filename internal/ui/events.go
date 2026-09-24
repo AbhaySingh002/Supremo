@@ -20,10 +20,10 @@ const (
 	progressPhase       progressKind = "phase"
 	progressCompletion  progressKind = "completion"
 	progressChecklist   progressKind = "checklist"
-	progressCheckpoint  progressKind = "checkpoint"
-	progressDebug       progressKind = "debug"
-	progressActivity    progressKind = "activity"
-	progressError       progressKind = "error"
+
+	progressDebug    progressKind = "debug"
+	progressActivity progressKind = "activity"
+	progressError    progressKind = "error"
 )
 
 type progressEvent struct {
@@ -41,7 +41,6 @@ type progressEvent struct {
 	Step       int
 	CallID     string
 	Todos      []api.TodoItem
-	Checkpoint *api.Checkpoint
 }
 
 func progressFromAPI(event api.Event) []progressEvent {
@@ -80,11 +79,7 @@ func progressFromAPI(event api.Event) []progressEvent {
 		if json.Unmarshal(event.Data, &payload) == nil {
 			return []progressEvent{{Kind: progressChecklist, SessionID: event.SessionID, Todos: payload.Todos}}
 		}
-	case api.EventCheckpointAvailable:
-		var payload api.CheckpointAvailable
-		if json.Unmarshal(event.Data, &payload) == nil {
-			return []progressEvent{{Kind: progressCheckpoint, SessionID: event.SessionID, Tool: payload.Tool, Checkpoint: &payload.Checkpoint}}
-		}
+
 	case api.EventRetry:
 		var payload api.RetryDetail
 		_ = json.Unmarshal(event.Data, &payload)

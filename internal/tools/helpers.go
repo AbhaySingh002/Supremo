@@ -123,8 +123,7 @@ func classifyToolError(err error) string {
 		return "canceled"
 	case errors.Is(err, ErrInvalidInput):
 		return ErrorClassToolArgument
-	case errorClass(err) == ErrorClassCheckpoint:
-		return ErrorClassCheckpoint
+
 	case errorClass(err) == ErrorClassPermission:
 		return ErrorClassPermission
 	case errors.Is(err, ErrToolNotFound):
@@ -139,10 +138,7 @@ func errorClass(err error) string {
 	if errors.As(err, &classified) {
 		return classified.Class
 	}
-	var conflict *CheckpointConflictError
-	if errors.As(err, &conflict) {
-		return ErrorClassCheckpoint
-	}
+
 	return ""
 }
 
@@ -156,7 +152,7 @@ func ClassifyToolOutcome(result *ToolResult, err error) ToolOutcomeClass {
 			return ToolOutcomeCancelled
 		case errorClass(err) == ErrorClassPermission:
 			return ToolOutcomePermissionBlocked
-		case errorClass(err) == ErrorClassCheckpoint, errorClass(err) == ErrorClassProvider:
+		case errorClass(err) == ErrorClassProvider:
 			return ToolOutcomeFatal
 		case strings.Contains(err.Error(), "panicked:"):
 			return ToolOutcomeFatal
@@ -185,8 +181,7 @@ func ClassifyToolOutcome(result *ToolResult, err error) ToolOutcomeClass {
 			return ToolOutcomeCancelled
 		case ErrorClassPermission, "permission_denied", "denied":
 			return ToolOutcomePermissionBlocked
-		case ErrorClassCheckpoint, "checkpoint_error":
-			return ToolOutcomeFatal
+
 		case "conflict", "recoverable":
 			return ToolOutcomeRecoverable
 		default:

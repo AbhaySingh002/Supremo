@@ -80,7 +80,11 @@ func CloseWorkspace(root string) error {
 		return nil
 	}
 	store.closeSubscriptions()
-	return store.db.Close()
+	err = store.db.Close()
+	if store.objects != "" {
+		_ = os.RemoveAll(store.objects)
+	}
+	return err
 }
 
 func canonicalRoot(root string) (string, error) {
@@ -105,26 +109,15 @@ func open(ctx context.Context, root string) (*Store, error) {
 		return nil, err
 	}
 
-	workspaceID, err := ResolveWorkspaceIdentity(ctx, clean)
+	hash := sha256.Sum256([]byte(clean))
+	workspaceID := "ws-" + hex.EncodeToString(hash[:8])
+
+	objects, err := os.MkdirTemp("", "supremo-artifacts-*")
 	if err != nil {
-		return nil, fmt.Errorf("resolve workspace identity: %w", err)
+		return nil, fmt.Errorf("create temp objects directory: %w", err)
 	}
 
-	// Safely migrate legacy .supremo directory if present and not yet migrated
-	if err := MigrateLegacyWorkspace(ctx, clean, workspaceID); err != nil {
-		return nil, fmt.Errorf("migrate legacy workspace: %w", err)
-	}
-
-	workspaceDir := WorkspaceDir(workspaceID)
-	objects := WorkspaceObjectsDir(workspaceID)
-	if err := os.MkdirAll(workspaceDir, 0700); err != nil {
-		return nil, fmt.Errorf("create workspace storage directory: %w", err)
-	}
-	if err := os.MkdirAll(objects, 0700); err != nil {
-		return nil, fmt.Errorf("create workspace objects directory: %w", err)
-	}
-
-	database := WorkspaceDBPath(workspaceID)
+	database := "file:" + workspaceID + "?mode=memory&cache=shared"
 	db, err := sql.Open("sqlite", database)
 	if err != nil {
 		return nil, fmt.Errorf("open state database: %w", err)
@@ -137,7 +130,7 @@ func open(ctx context.Context, root string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("ping state database: %w", err)
 	}
-	for _, pragma := range []string{"PRAGMA foreign_keys = ON", "PRAGMA journal_mode = WAL", "PRAGMA synchronous = FULL"} {
+	for _, pragma := range []string{"PRAGMA foreign_keys = ON", "PRAGMA journal_mode = MEMORY", "PRAGMA synchronous = OFF"} {
 		if _, err := db.ExecContext(ctx, pragma); err != nil {
 			db.Close()
 			return nil, fmt.Errorf("configure state database: %w", err)

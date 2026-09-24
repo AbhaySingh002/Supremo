@@ -22,7 +22,6 @@ import (
 
 	"github.com/AbhaySingh002/supremo/internal/parser/models"
 	"github.com/AbhaySingh002/supremo/internal/protocol"
-	"github.com/AbhaySingh002/supremo/internal/repository"
 	"github.com/AbhaySingh002/supremo/internal/state"
 	"github.com/AbhaySingh002/supremo/internal/tools"
 )
@@ -43,7 +42,6 @@ const (
 	LayerPinned      Layer = "L1"
 	LayerState       Layer = "L2"
 	LayerDurableObs  Layer = "L3"
-	LayerRepository  Layer = "L4"
 	LayerExactSource Layer = "L5"
 	LayerObservation Layer = "L6"
 	LayerTools       Layer = "L7"
@@ -228,11 +226,10 @@ type Prepared struct {
 // optional for small tests and isolated read-only workers.
 type Compiler struct {
 	store state.Repository
-	repo  repository.QueryService
 }
 
-func New(store state.Repository, repo repository.QueryService) *Compiler {
-	return &Compiler{store: store, repo: repo}
+func New(store state.Repository) *Compiler {
+	return &Compiler{store: store}
 }
 
 func (c *Compiler) Prepare(ctx context.Context, request Request) (*Prepared, error) {
@@ -605,40 +602,7 @@ func (c *Compiler) candidates(ctx context.Context, request Request, working *Wor
 	if revision, err := c.store.LatestRepositoryRevision(ctx); err == nil {
 		world = revision.WorkspaceRevisionID
 	}
-	if c.repo != nil && strings.TrimSpace(request.Objective) != "" {
-		queries := make([]repository.Query, 0, len(ObjectiveTerms(request.Objective))+1)
-		for _, term := range ObjectiveTerms(request.Objective) {
-			queries = append(queries, repository.Query{Text: term, Limit: 4, Exact: true})
-		}
-		queries = append(queries, repository.Query{Text: request.Objective, Limit: 12, FullText: true})
-		for _, query := range queries {
-			result, err := c.repo.Query(ctx, query)
-			if err != nil {
-				continue
-			}
-			for _, repositoryCandidate := range result.Candidates {
-				candidate := Candidate{ID: "repository:" + repositoryCandidate.ID, Kind: repositoryCandidate.Type, Layer: LayerRepository, Content: repositoryCandidate.Content, Representation: state.RepresentationR2, Authority: repositoryCandidate.Provenance.Authority, Provenance: repositoryCandidate.Provenance, Freshness: FreshCurrent, SourceHash: repositoryCandidate.Hash, FileID: repositoryCandidate.FileID}
-				candidate.Signals = repositorySignals(repositoryCandidate, query.Exact)
-				if candidate.Content == "" {
-					candidate.Content = repositoryCandidate.Signature
-					candidate.Representation = state.RepresentationR3
-				}
-				if candidate.FileID != "" && current[candidate.FileID] != candidate.SourceHash {
-					candidate.Freshness = FreshStale
-				}
-				if workingContains(working.Items, repositoryCandidate.ID) {
-					candidate.Signals["working_set"] = 1
-					if candidate.Freshness == FreshCurrent {
-						if representations, representationErr := c.store.RepositoryRepresentations(ctx, repositoryCandidate.ID); representationErr == nil {
-							candidate = upgradeRepresentation(candidate, representations, request.OverflowPressure)
-						}
-					}
-				}
-				add(candidate)
-				working.Items = promote(working.Items, WorkingSetItem{ID: repositoryCandidate.ID, Kind: "repository", SourceHash: repositoryCandidate.Hash, LastSeen: working.Generation, PromotedBy: "retrieval", UpdatedAt: time.Now().UTC()})
-			}
-		}
-	}
+
 	return candidates, world, route, nil
 }
 
@@ -765,11 +729,11 @@ func selectForDecision(candidates []Candidate, budget *Budget, request Request) 
 	}
 	switch profile {
 	case protocol.Execution:
-		order = append(order, "source", "known_research_evidence", "repository", "message", "tool_result")
+		order = append(order, "source", "known_research_evidence", "message", "tool_result")
 	default:
 		order = append(order, "known_research_evidence", "message", "tool_result")
 		if pressure == 0 {
-			order = append(order, "source", "repository")
+			order = append(order, "source")
 		}
 	}
 	wanted := map[string]string{
@@ -780,7 +744,7 @@ func selectForDecision(candidates []Candidate, budget *Budget, request Request) 
 		"tool_schema":             "phase_tool",
 		"side_question":           "user_turn", "user_turn": "user_turn", "latest_failure": "latest_failure",
 		"message": "conversation", "tool_result": "latest_feedback",
-		"source": "exact_source", "repository": "exact_source",
+		"source": "exact_source",
 	}
 	requiredKind := map[string]bool{
 		"control": true, "objective": true, "current_focus": true, "active_task_instruction": true,
@@ -822,7 +786,7 @@ func selectForDecision(candidates []Candidate, budget *Budget, request Request) 
 		if kind == "source" {
 			candidate.Content = windowExactSource(candidate, haystack)
 		}
-		required := requiredKind[kind] || candidate.Pinned || (profile == protocol.Execution && (kind == "source" || kind == "repository") && active)
+		required := requiredKind[kind] || candidate.Pinned || (profile == protocol.Execution && kind == "source" && active)
 		if skip, reason := overflowSkip(profile, pressure, kind, active, required); skip {
 			rejected = append(rejected, Rejection{ID: candidate.ID, Reason: reason, Signals: candidate.Signals})
 			return
@@ -863,7 +827,7 @@ func selectForDecision(candidates []Candidate, budget *Budget, request Request) 
 		reason := "not_needed_now"
 		if c.Freshness == FreshStale {
 			reason = "stale_source"
-		} else if pressure > 0 && (kind == "source" || kind == "repository") {
+		} else if pressure > 0 && kind == "source" {
 			reason = overflowBudgetReason(profile, kind, sourceActive(c, haystack))
 		}
 		rejected = append(rejected, Rejection{ID: c.ID, Reason: reason, Signals: c.Signals})
@@ -874,9 +838,6 @@ func selectForDecision(candidates []Candidate, budget *Budget, request Request) 
 func decisionKind(c Candidate) string {
 	if c.Layer == LayerExactSource {
 		return "source"
-	}
-	if c.Layer == LayerRepository {
-		return "repository"
 	}
 	return c.Kind
 }
@@ -980,7 +941,7 @@ func overflowSkip(profile protocol.Profile, pressure int, kind string, active, r
 		return false, ""
 	}
 	switch kind {
-	case "source", "repository":
+	case "source":
 		if profile == protocol.Execution && !active {
 			return true, overflowBudgetReason(profile, kind, false)
 		}
@@ -998,8 +959,6 @@ func overflowBudgetReason(profile protocol.Profile, kind string, active bool) st
 		if !active {
 			return "overflow_unrelated_source"
 		}
-	case "repository":
-		return "overflow_unrelated_retrieval"
 	case "known_research_evidence":
 		return "overflow_optional_facts"
 	case "message", "tool_result":
@@ -1086,7 +1045,7 @@ func systemCandidateOrder(candidate Candidate) int {
 		return 50 // L2: Active plan, working memory, tasks
 	case LayerDurableObs:
 		return 55 // L3: Durable research observations
-	case LayerRepository, LayerExactSource:
+	case LayerExactSource:
 		return 60 // L4/L5: Dynamic repository evidence and source files
 	default:
 		return 80
@@ -1132,7 +1091,7 @@ func selectedSectionTokens(selected []Candidate) []models.PromptSection {
 			section = "selected_tools"
 		case LayerDurableObs:
 			section = "durable_observations"
-		case LayerRepository, LayerExactSource:
+		case LayerExactSource:
 			section = "repository_evidence"
 		case LayerObservation:
 			section = "conversation_and_observations"
@@ -1298,7 +1257,6 @@ func score(candidate Candidate) float64 {
 		LayerState:       650,
 		LayerDurableObs:  600,
 		LayerExactSource: 500,
-		LayerRepository:  400,
 		LayerObservation: 250,
 		LayerTools:       100,
 	}[candidate.Layer]
@@ -1328,23 +1286,6 @@ func score(candidate Candidate) float64 {
 	}
 	score -= float64(estimate(candidate.Content)) / 32
 	return score
-}
-
-func repositorySignals(candidate state.RepositoryCandidate, exact bool) map[string]float64 {
-	signals := map[string]float64{}
-	if exact {
-		signals["exact"] = 1
-	}
-	if candidate.BM25 != 0 {
-		signals["bm25"] = candidate.BM25
-	}
-	if candidate.GraphDistance > 0 {
-		signals["graph"] = 1 / float64(candidate.GraphDistance)
-	}
-	if candidate.SemanticSimilarity != 0 {
-		signals["semantic"] = candidate.SemanticSimilarity
-	}
-	return signals
 }
 
 func workingIDs(items []WorkingSetItem) []string {

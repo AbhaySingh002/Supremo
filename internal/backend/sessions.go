@@ -136,16 +136,14 @@ func (s *Service) UpdateSession(ctx context.Context, request api.UpdateSessionRe
 	if request.DryRun != nil {
 		session.DryRun = *request.DryRun
 	}
-	if request.Checklist != nil || request.Rewind != nil || request.ProviderRetry != nil {
+	if request.Checklist != nil || request.ProviderRetry != nil {
 		if session.Features == nil {
 			session.Features = &agent.FeatureConfig{}
 		}
 		if request.Checklist != nil {
 			session.Features.UX.Checklist = request.Checklist
 		}
-		if request.Rewind != nil {
-			session.Features.UX.Rewind = request.Rewind
-		}
+
 		if request.ProviderRetry != nil {
 			session.Features.Retry.Response = request.ProviderRetry
 		}
@@ -267,7 +265,7 @@ func sessionDTO(session *agent.Session) api.Session {
 	return api.Session{ID: session.ID, Name: session.Name, CreatedAt: session.CreatedAt, UpdatedAt: session.UpdatedAt, Status: session.Status,
 		Revision: session.Version, Provider: session.Provider, Model: session.Model, ApprovalMode: string(session.ApprovalMode), DryRun: session.DryRun,
 		PlanMode: session.PlanModeActive(), ParentSessionID: session.ParentSessionID, Origin: session.Origin,
-		Checklist: session.ChecklistEnabled(), Rewind: session.RewindEnabled(), ProviderRetry: session.ResponseRetryEnabled()}
+		Checklist: session.ChecklistEnabled(), ProviderRetry: session.ResponseRetryEnabled()}
 }
 
 func validateSessionName(name string) error {

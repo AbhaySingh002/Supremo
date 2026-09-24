@@ -193,12 +193,7 @@ func (s *Server) dispatch(ctx context.Context, request api.RPCRequest) (any, err
 	case "session.reset":
 		var params api.SessionRequest
 		return call(ctx, request.Params, &params, s.backend.ResetSession)
-	case "checkpoint.list":
-		var params api.SessionRequest
-		return call(ctx, request.Params, &params, s.backend.ListCheckpoints)
-	case "checkpoint.rewind":
-		var params api.RewindRequest
-		return call(ctx, request.Params, &params, s.backend.RewindSession)
+
 	case "side.answer":
 		var params api.SideQuestionRequest
 		return call(ctx, request.Params, &params, s.backend.AnswerSideQuestion)

@@ -13,7 +13,6 @@ import (
 	"github.com/AbhaySingh002/supremo/internal/parser/models"
 	"github.com/AbhaySingh002/supremo/internal/protocol"
 	"github.com/AbhaySingh002/supremo/internal/providers"
-	"github.com/AbhaySingh002/supremo/internal/repository"
 	"github.com/AbhaySingh002/supremo/internal/runtime"
 	"github.com/AbhaySingh002/supremo/internal/sessionlog"
 	"github.com/AbhaySingh002/supremo/internal/state"
@@ -83,7 +82,6 @@ type Agent struct {
 	ephemeral           bool
 	debug               bool
 	progress            func(ProgressEvent)
-	repository          *repository.Service
 	retryWait           func(context.Context, time.Duration) error
 	workingMemory       *WorkingMemoryManager
 	mu                  sync.Mutex
@@ -123,9 +121,6 @@ func (a *Agent) WorkingMemory() *WorkingMemoryManager {
 	}
 	return nil
 }
-
-// SetRepository makes workspace discovery available to tool calls in every task.
-func (a *Agent) SetRepository(service *repository.Service) { a.repository = service }
 
 // SetRetryPolicy configures an explicit step retry policy on the agent.
 func (a *Agent) SetRetryPolicy(policy runtime.RetryPolicy) { a.retryPolicy = policy }
@@ -170,8 +165,6 @@ func (a *Agent) taskContext(ctx context.Context, session *Session) (context.Cont
 	ctx, cancel := context.WithCancel(ctx)
 	ctx = tools.WithWorkspace(ctx, a.workspace)
 	ctx = tools.WithDryRun(ctx, session.DryRun)
-	ctx = tools.WithCheckpointSession(ctx, session.ID, session.RewindEnabled())
-	ctx = repository.WithService(ctx, a.repository)
 	if session.Origin == "subagent" {
 		ctx = tools.WithDelegated(ctx)
 		if session.DelegationScope == SubagentScopeLocalRead {
@@ -184,7 +177,7 @@ func (a *Agent) taskContext(ctx context.Context, session *Session) (context.Cont
 			cancel()
 			return nil, nil, fmt.Errorf("open context store: %w", err)
 		}
-		ctx = tools.WithLifecycleRecorder(ctx, &stateRecorder{store: store, repository: a.repository, root: a.workspace, sessionID: session.ID})
+		ctx = tools.WithLifecycleRecorder(ctx, &stateRecorder{store: store, root: a.workspace, sessionID: session.ID})
 	}
 	if session.ApprovalMode != "" {
 		ctx = tools.WithApprovalMode(ctx, session.ApprovalMode)
@@ -358,29 +351,6 @@ func promptToolContext(ctx context.Context, prompt *models.Prompt) context.Conte
 func (a *Agent) ReadAllTranscript(ctx context.Context, sessionID string) ([]models.Message, error) {
 	messages, err := a.transcript.ReadAllTranscript(ctx, sessionID)
 	return append([]models.Message(nil), messages...), err
-}
-
-// Checkpoints returns the current chat's rewind history.
-func (a *Agent) Checkpoints(root, sessionID string) ([]tools.CheckpointSummary, error) {
-	return tools.ListCheckpoints(root, sessionID)
-}
-
-// Rewind restores covered workspace files to immediately before a checkpoint.
-func (a *Agent) Rewind(ctx context.Context, root, sessionID, checkpointID string, force bool) (tools.RewindResult, error) {
-	result, err := tools.Rewind(ctx, root, sessionID, checkpointID, force)
-	if err != nil || result.Restored == 0 {
-		return result, err
-	}
-	store, err := state.Open(root)
-	if err != nil {
-		return result, err
-	}
-	revision, err := store.ObserveWorkspace(context.WithoutCancel(ctx), workspaceSnapshot(ctx, root, "rewind"))
-	if err != nil {
-		return result, err
-	}
-	_, err = store.AppendEvent(context.WithoutCancel(ctx), state.EventInput{SessionID: sessionID, Type: "workspace.rewound", Payload: map[string]any{"checkpoint_id": checkpointID, "workspace_revision": revision.ID, "restored": result.Restored}})
-	return result, err
 }
 
 // DeleteSession permanently removes one session and its private history.

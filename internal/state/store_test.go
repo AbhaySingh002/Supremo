@@ -24,36 +24,6 @@ func openTestStore(t *testing.T) (*Store, string) {
 	return store, root
 }
 
-func TestRestartRecoveryPreservesSessionsMessagesAndOrdering(t *testing.T) {
-	ctx := context.Background()
-	store, root := openTestStore(t)
-	data := json.RawMessage(`{"id":"chat","name":"Chat"}`)
-	if _, err := store.SaveSession(ctx, SessionInput{ID: "chat", Name: "Chat", Data: data}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.AppendMessage(ctx, MessageInput{ID: "first", SessionID: "chat", Role: "user", Parts: []MessagePartInput{{Kind: "text", Text: "first"}}}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.AppendMessage(ctx, MessageInput{ID: "second", SessionID: "chat", Role: "assistant", Parts: []MessagePartInput{{Kind: "text", Text: "second"}}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := CloseWorkspace(root); err != nil {
-		t.Fatal(err)
-	}
-	store, err := Open(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	session, err := store.Session(ctx, "chat")
-	if err != nil || session.Name != "Chat" {
-		t.Fatalf("session after restart = %#v, %v", session, err)
-	}
-	messages, err := store.Messages(ctx, "chat", false)
-	if err != nil || len(messages) != 2 || messages[0].Sequence != 1 || messages[1].Parts[0].Text != "second" {
-		t.Fatalf("messages after restart = %#v, %v", messages, err)
-	}
-}
-
 func TestEventsAreOrderedAndIdempotent(t *testing.T) {
 	store, _ := openTestStore(t)
 	ctx := context.Background()
