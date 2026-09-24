@@ -14,6 +14,7 @@ import (
 )
 
 func TestInspectionReuseRoundTrip(t *testing.T) {
+	t.Setenv("SUPREMO_DATA_DIR", t.TempDir())
 	root := t.TempDir()
 	store, err := state.Open(root)
 	if err != nil {
