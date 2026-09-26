@@ -165,28 +165,6 @@ type Usage struct {
 	CostUSD      *float64 `json:"cost_usd,omitempty"`
 }
 
-// MalformedOutputError marks a completed provider response that contained no
-// executable or user-visible answer.
-type MalformedOutputError struct{ Reason string }
-
-func (e *MalformedOutputError) Error() string      { return e.Reason }
-func (e *MalformedOutputError) ErrorClass() string { return "PROTOCOL_ERROR" }
-
-func IsMalformedOutput(err error) bool {
-	if err == nil {
-		return false
-	}
-	var malformed *MalformedOutputError
-	if errors.As(err, &malformed) {
-		return true
-	}
-	var failure *ProviderFailure
-	if errors.As(err, &failure) && failure.Code == FailureEmptyResponse {
-		return true
-	}
-	return false
-}
-
 // ModelInfo is the provider metadata needed to choose and size a model at runtime.
 type ModelInfo struct {
 	ID              string `json:"id"`

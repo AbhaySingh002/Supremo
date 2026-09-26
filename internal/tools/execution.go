@@ -148,33 +148,12 @@ func WithApprovalMode(ctx context.Context, mode ApprovalMode) context.Context {
 	return context.WithValue(ctx, approvalModeKey, &approvalPolicy{mode: NormalizeApprovalMode(mode)})
 }
 
-// WithDetachedApprovalMode gives an isolated worker its own approval policy.
-// Interactive descendants normally share their parent's policy so a user can
-// change an active task from the TUI. Background workers must not share it:
-// their internal auto-approval for a restricted tool set must never weaken the
-// parent task's policy.
-func WithDetachedApprovalMode(ctx context.Context, mode ApprovalMode) context.Context {
-	return context.WithValue(ctx, approvalModeKey, &approvalPolicy{mode: NormalizeApprovalMode(mode)})
-}
-
 func ApprovalModeFromContext(ctx context.Context) ApprovalMode {
 	policy, ok := ctx.Value(approvalModeKey).(*approvalPolicy)
 	if !ok {
 		return ""
 	}
 	return policy.get()
-}
-
-// SetApprovalMode updates a policy previously installed with WithApprovalMode.
-// It returns false for ordinary contexts so background callers cannot silently
-// acquire an approval policy.
-func SetApprovalMode(ctx context.Context, mode ApprovalMode) bool {
-	policy, ok := ctx.Value(approvalModeKey).(*approvalPolicy)
-	if !ok {
-		return false
-	}
-	policy.set(mode)
-	return true
 }
 
 func NormalizeApprovalMode(mode ApprovalMode) ApprovalMode {

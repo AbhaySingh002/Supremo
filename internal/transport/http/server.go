@@ -216,12 +216,7 @@ func (s *Server) dispatch(ctx context.Context, request api.RPCRequest) (any, err
 			return nil, err
 		}
 		return s.backend.ProviderUsage(ctx)
-	case "provider.embeddings.configure":
-		var params api.ConfigureEmbeddingsRequest
-		if err := decodeParams(request.Params, &params); err != nil {
-			return nil, err
-		}
-		return accepted(s.backend.ConfigureEmbeddings(ctx, params))
+
 	case "config.reload":
 		if err := noParams(request.Params); err != nil {
 			return nil, err
@@ -251,14 +246,7 @@ func (s *Server) dispatch(ctx context.Context, request api.RPCRequest) (any, err
 	case "context.status":
 		var params api.ContextStatusRequest
 		return call(ctx, request.Params, &params, s.backend.ContextStatus)
-	case "index.status":
-		if err := noParams(request.Params); err != nil {
-			return nil, err
-		}
-		return s.backend.IndexStatus(ctx)
-	case "index.update":
-		var params api.UpdateIndexRequest
-		return call(ctx, request.Params, &params, s.backend.UpdateIndex)
+
 	case "workspace.initialize":
 		if err := noParams(request.Params); err != nil {
 			return nil, err

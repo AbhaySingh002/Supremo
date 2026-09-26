@@ -4,7 +4,7 @@ package models
 // Operations:
 // - "retain": keep/prioritize this key/statement in active working memory.
 // - "release": this key no longer needs active-context priority.
-// - "supersede": replace a previous belief for this key with a newer statement.
+
 // Directives are advisory and never delete durable transcripts, artifacts, or observations.
 type MemoryDirective struct {
 	Operation string   `json:"operation"`

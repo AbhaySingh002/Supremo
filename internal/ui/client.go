@@ -340,7 +340,7 @@ func (m *Model) applyAPIEvent(event api.Event) tea.Cmd {
 		}
 	case api.EventSubagentDescriptor, api.EventSubagentQueued, api.EventSubagentRunStart, api.EventSubagentRunEnd:
 		return refreshSnapshotCmd(m.ctx, m.client, m.session.ID, m.sessionEpoch)
-	case api.EventSessionUpdated, api.EventSessionCreated, api.EventSessionArchived:
+	case api.EventSessionUpdated, api.EventSessionCreated:
 		return refreshSnapshotCmd(m.ctx, m.client, m.session.ID, m.sessionEpoch)
 	}
 	return nil

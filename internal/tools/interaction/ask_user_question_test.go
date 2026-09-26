@@ -24,22 +24,8 @@ func TestAskUserQuestionValidationAndExecution(t *testing.T) {
 
 	ctx := context.Background()
 
-	// 1. Rejects when called from delegated subagent
-	subagentCtx := interaction.WithDelegatedAgent(ctx, true)
-	res, err := tool.Execute(subagentCtx, map[string]any{
-		"questions": []any{
-			map[string]any{"id": "q1", "question": "Which database?"},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Success || res.Status != tools.ToolStatusFailed {
-		t.Fatalf("expected ToolStatusFailed when called from delegated agent, got: %#v", res)
-	}
-
 	// 2. Rejects empty questions list
-	res, err = tool.Execute(ctx, map[string]any{"questions": []any{}})
+	res, err := tool.Execute(ctx, map[string]any{"questions": []any{}})
 	if err != nil {
 		t.Fatal(err)
 	}

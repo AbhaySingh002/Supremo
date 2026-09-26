@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -186,7 +185,7 @@ func (m *WorkingMemoryManager) Load(ctx context.Context, sessionID, taskID strin
 		return nil, errors.New("state store and session id required")
 	}
 	doc, err := m.store.Document(ctx, workingMemoryDocumentKind, workingMemoryDocumentID(sessionID, taskID))
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, state.ErrNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -215,7 +214,7 @@ func (m *WorkingMemoryManager) Save(ctx context.Context, memory *WorkingMemory) 
 	version := int64(0)
 	if err == nil {
 		version = doc.Version
-	} else if !errors.Is(err, sql.ErrNoRows) {
+	} else if !errors.Is(err, state.ErrNotFound) {
 		return err
 	}
 	_, err = m.store.SaveDocument(ctx, state.DocumentInput{

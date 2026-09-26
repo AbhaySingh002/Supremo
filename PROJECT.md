@@ -32,11 +32,10 @@ one-shot CLI -> app.AgentAPI -------------------------------┤
 | `internal/agent` | Turn and step loop, session surface, pressure recovery, scheduler, runtime isolation, and subagents |
 | `internal/context` | Read-only request preparation, working-set selection, manifests, traces, and prompt compilation |
 | `internal/sessionlog` | Typed event encoding, replay, lifecycle repair, and model-visible surface reconstruction |
-| `internal/state` | SQLite storage, projections, artifacts, documents, checkpoints, and subscriptions |
+| `internal/state` | In-memory storage, projections, temporary artifacts, documents, checkpoints, and subscriptions |
 | `internal/providers` | Provider registry, protocol adapters, streaming, retries, usage, and model catalogs |
 | `internal/tools` | Tool registry, descriptors, policy, approvals, execution, and activity |
 | `internal/tools/filesystem` | Path locks, read hashes, CAS mutations, atomic writes, and rewind checkpoints |
-| `internal/repository` | Workspace indexing and evidence retrieval |
 | `internal/capabilities` | Plan guards, observation reuse, and repeat-call feedback |
 | `internal/ui` | Bubble Tea frontend state, API intents, rendering, selectors, and local terminal actions |
 

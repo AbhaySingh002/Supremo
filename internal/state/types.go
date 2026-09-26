@@ -10,7 +10,10 @@ import (
 	"time"
 )
 
-var ErrConflict = errors.New("state version conflict")
+var (
+	ErrConflict = errors.New("state version conflict")
+	ErrNotFound = errors.New("not found")
+)
 
 // Repository groups the durable boundaries consumed by higher-level code.
 // SQLite is intentionally hidden behind this interface.
@@ -34,7 +37,6 @@ type ObservationStore interface {
 type EventStore interface {
 	AppendEvent(context.Context, EventInput) (Event, error)
 	Events(context.Context, EventQuery) ([]Event, error)
-	RebuildCurrentState(context.Context) error
 }
 
 type SessionStore interface {
@@ -49,12 +51,8 @@ type SessionStore interface {
 
 type StateStore interface {
 	SaveDocument(context.Context, DocumentInput) (Document, error)
-	DeleteDocument(context.Context, DocumentDeleteInput) error
 	Document(context.Context, string, string) (Document, error)
 	Documents(context.Context, string, string) ([]Document, error)
-	CreateClaim(context.Context, ClaimInput) (Claim, error)
-	SupersedeClaim(context.Context, string, ClaimInput) (Claim, error)
-	Claims(context.Context, string, bool) ([]Claim, error)
 }
 
 type ArtifactStore interface {
@@ -82,20 +80,7 @@ type FileStateStore interface {
 type RepositoryIndexStore interface {
 	RepositoryFiles(context.Context) ([]RepositoryFileState, error)
 	LatestRepositoryRevision(context.Context) (RepositoryRevision, error)
-	TouchRepositoryFile(context.Context, RepositoryFileState) error
-	BeginRepositoryRevision(context.Context, RepositoryRevisionInput) (RepositoryRevision, error)
 	ApplyRepositoryFile(context.Context, RepositoryFileInput) (RepositoryFileState, error)
-	MarkRepositoryFileDeleted(context.Context, RepositoryDeleteInput) error
-	RepositoryCandidates(context.Context, RepositoryLookup) ([]RepositoryCandidate, error)
-	RepositoryCandidatesByID(context.Context, []string) ([]RepositoryCandidate, error)
-	RepositorySymbolCandidatesByID(context.Context, []string) ([]RepositoryCandidate, error)
-	RepositoryCurrentChunks(context.Context) ([]RepositoryCandidate, error)
-	RepositoryNeighbors(context.Context, string, RelationDirection, int) ([]RepositoryRelation, error)
-	RepositoryRepresentations(context.Context, string) ([]RepositoryRepresentation, error)
-	RepositorySemanticSettings(context.Context) (SemanticSettings, error)
-	SetRepositorySemanticSettings(context.Context, SemanticSettings) error
-	PutRepositoryEmbeddings(context.Context, []RepositoryEmbeddingInput) error
-	RepositoryEmbeddings(context.Context, string) ([]RepositoryEmbedding, error)
 }
 
 type EventInput struct {
@@ -263,31 +248,6 @@ type Provenance struct {
 	ObservedAt          time.Time `json:"observed_at,omitempty"`
 	FreshUntil          time.Time `json:"fresh_until,omitempty"`
 	SupersedesID        string    `json:"supersedes_id,omitempty"`
-}
-
-type ClaimInput struct {
-	ID         string
-	Kind       string
-	Statement  string
-	Scope      string
-	Status     string
-	Confidence float64
-	Provenance Provenance
-	Event      EventInput
-}
-
-type Claim struct {
-	ID             string
-	LineageID      string
-	Kind           string
-	Statement      string
-	Scope          string
-	Status         string
-	Confidence     float64
-	Provenance     Provenance
-	SupersedesID   string
-	SupersededByID string
-	CreatedAt      time.Time
 }
 
 type ArtifactInput struct {

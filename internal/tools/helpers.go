@@ -1,14 +1,12 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -281,72 +279,4 @@ func PathExists(path string) (os.FileInfo, error) {
 		return nil, err
 	}
 	return info, nil
-}
-
-func IsHidden(name string) bool {
-	return strings.HasPrefix(name, ".")
-}
-
-func ShouldSkipFile(path string) bool {
-	baseName := filepath.Base(path)
-	if IsHidden(baseName) {
-		return true
-	}
-	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case ".exe", ".dll", ".so", ".dylib", ".bin", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".zip":
-		return true
-	}
-	return false
-}
-
-func ValidateDirectory(ctx context.Context, directory string) (string, error) {
-	if directory == "" {
-		return "", ErrInvalidInput
-	}
-	return ValidateAndResolvePath(ctx, directory)
-}
-
-// ReadLimitedFile prevents one source file from exhausting tool memory.
-func ReadLimitedFile(path string, limit int64) ([]byte, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, limit+1))
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(data)) > limit {
-		return nil, ErrFileTooLarge
-	}
-	return data, nil
-}
-
-// ReadSearchFile applies the same size and binary policy to every source search.
-func ReadSearchFile(path string) ([]byte, error) {
-	data, err := ReadLimitedFile(path, MaxFileBytes)
-	if err != nil {
-		return nil, err
-	}
-	if bytes.IndexByte(data, 0) >= 0 {
-		return nil, ErrBinaryFile
-	}
-	return data, nil
-}
-
-func SearchDepth(root, path string) (int, error) {
-	rel, err := filepath.Rel(root, path)
-	if err != nil || rel == "." {
-		return 0, err
-	}
-	return len(strings.Split(rel, string(filepath.Separator))), nil
-}
-
-func SearchDepthLimit(requested int) int {
-	if requested <= 0 || requested > MaxSearchDepth {
-		return MaxSearchDepth
-	}
-	return requested
 }

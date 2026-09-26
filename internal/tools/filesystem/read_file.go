@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/AbhaySingh002/supremo/internal/tools"
@@ -176,15 +175,6 @@ func recoverableResult(message string, data map[string]any) *tools.ToolResult {
 		Retryable: true,
 		Error:     &tools.ToolError{Class: "recoverable", Message: message},
 	}
-}
-
-func displayPath(ctx context.Context, absPath string) string {
-	if root := tools.Workspace(ctx); root != "" {
-		if rel, err := filepath.Rel(root, absPath); err == nil {
-			return filepath.ToSlash(rel)
-		}
-	}
-	return filepath.ToSlash(absPath)
 }
 
 func hashFile(path string) (string, error) {

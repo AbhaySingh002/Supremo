@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -204,7 +203,7 @@ func loadSession(root, id string, migrate bool) (*Session, error) {
 			session.Status = "active"
 		}
 		durableState = true
-	} else if !errors.Is(err, sql.ErrNoRows) {
+	} else if !errors.Is(err, state.ErrNotFound) {
 		return nil, err
 	} else {
 		path = sessionStatePath(root, id)

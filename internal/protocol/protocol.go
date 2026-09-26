@@ -12,20 +12,13 @@ const (
 	SideAnswer     Profile = "side_answer"
 )
 
-func Valid(profile Profile) bool {
+func Validate(profile Profile) error {
 	switch profile {
 	case "", Conversational, Execution, SideAnswer:
-		return true
+		return nil
 	default:
-		return false
-	}
-}
-
-func Validate(profile Profile) error {
-	if !Valid(profile) {
 		return fmt.Errorf("unknown prompt profile %q", profile)
 	}
-	return nil
 }
 
 func SWEProfile(profile Profile) bool { return profile == Execution }

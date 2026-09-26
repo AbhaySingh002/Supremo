@@ -21,9 +21,6 @@ func TestGeminiThinkingStaysPrivate(t *testing.T) {
 	if got := streamText(response); got != "visible answer" {
 		t.Fatalf("stream text leaked thoughts: %q", got)
 	}
-	if got, err := safeExtractText(response); err != nil || got != "visible answer" {
-		t.Fatalf("response text leaked thoughts: %q, %v", got, err)
-	}
 }
 
 func TestGeminiToolOnlyFunctionCallIsValidCompletion(t *testing.T) {

@@ -106,7 +106,7 @@ func TestToolResultPrunerSurfaceReplacementAndProvenance(t *testing.T) {
 		t.Fatalf("unexpected nodes before pruning: %v", nodesBefore)
 	}
 
-	pruner := NewDefaultToolResultPruner()
+	pruner := NewToolResultPruner()
 	count, err := pruner.Prune(context.Background(), store, session)
 	if err != nil {
 		t.Fatalf("prune failed: %v", err)

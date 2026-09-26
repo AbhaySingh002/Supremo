@@ -11,7 +11,7 @@ This file is the single source of technical instructions for AI coding agents mo
 5. Fix the root cause at the narrowest shared boundary
 6. Implement the smallest complete change, then run the smallest relevant check
 
-Do not add speculative abstractions, plugin systems, dependencies, schema migrations, compatibility layers, or configuration switches. Add one only when the task requires it and the existing contracts cannot express the behavior.
+Do not add speculative abstractions, plugin systems, dependencies, compatibility layers, or configuration switches. Add one only when the task requires it and the existing contracts cannot express the behavior.
 
 ## Preserve architecture boundaries
 
@@ -21,7 +21,7 @@ Do not add speculative abstractions, plugin systems, dependencies, schema migrat
 - `internal/ui` is a frontend. It may depend on `internal/api` and UI packages, but must not import agent, state, provider, tool, repository, context, or backend implementation packages
 - `internal/agent` owns turn and step lifecycles, request pressure recovery, tool-result ordering, session runtimes, and subagent orchestration
 - `internal/context` prepares provider-neutral requests without writes; commit manifests only for requests that will be sent
-- `internal/state` and `internal/sessionlog` own durable storage, typed events, replay, projections, and artifacts
+- `internal/state` and `internal/sessionlog` own in-memory storage, typed events, replay, projections, and temporary artifacts
 - `internal/providers` adapts provider protocols. It must not own agent-loop policy or durable messages
 - `internal/tools` owns tool metadata, policy, approvals, checkpoints, and execution. Filesystem compare-and-swap (CAS) checks remain in filesystem tools
 
@@ -46,7 +46,7 @@ Interactive frontends must use `api.Client`. The legacy `app.AgentAPI` exists on
 - Wrap errors with operation context; retain both causes with `errors.Join` when terminal persistence also fails
 - Preserve filesystem path locking, atomic writes, read hashes, and stale-write diagnostics
 - Do not use destructive Git commands, overwrite unrelated work, or reformat untouched files
-- Do not add a database migration or dependency without explaining why the current schema or modules cannot support the change
+- Do not add a dependency without explaining why the current modules cannot support the change
 - Keep production builds free of debug logging and keep log redaction intact
 
 ## Test in proportion to risk

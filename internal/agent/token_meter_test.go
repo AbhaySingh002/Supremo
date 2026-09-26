@@ -45,7 +45,7 @@ func TestTokenMeterMeasure(t *testing.T) {
 	}
 	_ = session.applyEvent(uEvent)
 
-	meter := NewDefaultTokenMeter()
+	meter := NewTokenMeter()
 	prompt := &models.Prompt{
 		System:   "System instructions here",
 		Messages: session.DeriveMessages(),
@@ -78,7 +78,7 @@ func TestTokenMeterCountsFrozenEnvelopeWithoutMetadataDoubleCount(t *testing.T) 
 		Messages: []models.Message{{Role: models.RoleUser, Content: "abcdefgh"}},
 		Metadata: models.PromptMetadata{Sections: []models.PromptSection{{Name: "already-rendered", Tokens: 100_000}}},
 	}
-	measurement := NewDefaultTokenMeter().Measure(nil, prompt, 1_000_000)
+	measurement := NewTokenMeter().Measure(nil, prompt, 1_000_000)
 	want := EstimateTokens(prompt.System) + EstimateMessageTokens(prompt.Messages[0])
 	if measurement.TotalTokens != want {
 		t.Fatalf("exact envelope tokens = %d, want %d", measurement.TotalTokens, want)

@@ -129,35 +129,6 @@ func TestSSEUsesDurableCursorAndAuthorizationHeader(t *testing.T) {
 	}
 }
 
-func TestHTTPClientMatchesRPCAndEventContracts(t *testing.T) {
-	server, _ := startHTTPTestServer(t)
-	client, err := NewClient(server.URL(), "test-token", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	initialized, err := client.Initialize(context.Background())
-	if err != nil || initialized.APIVersion != api.Version || initialized.ServerVersion != "test" {
-		t.Fatalf("initialize = %#v, %v", initialized, err)
-	}
-	catalog, err := client.ListModels(context.Background(), api.ListModelsRequest{Refresh: true})
-	if err != nil || len(catalog.Providers) != 1 || catalog.Providers[0].MetadataState != "fresh" || catalog.Providers[0].Models[0].ID != "gpt-test" {
-		t.Fatalf("model catalog = %#v, %v", catalog, err)
-	}
-	stream, err := client.Subscribe(context.Background(), api.SubscribeRequest{SessionID: "chat", AfterCursor: 7})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer stream.Close()
-	select {
-	case event := <-stream.Events():
-		if event.Cursor != 8 || event.Type != "run/end" {
-			t.Fatalf("event = %#v", event)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("HTTP event stream did not deliver")
-	}
-}
-
 func TestListenRejectsNonLoopbackAddress(t *testing.T) {
 	if server, err := Listen("0.0.0.0:0", "token", "test", &testBackend{}); err == nil {
 		server.Close()

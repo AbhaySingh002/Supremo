@@ -59,21 +59,16 @@ func (m Measurement) IsPressured() bool {
 	return m.TotalTokens >= m.ThresholdTokens
 }
 
-// TokenMeter calculates token pressure for a full request before sending to the model provider.
-type TokenMeter interface {
-	Measure(session *Session, prompt *models.Prompt, contextLimit int) Measurement
-}
-
-// DefaultTokenMeter is the canonical token pressure calculator.
-type DefaultTokenMeter struct {
+// TokenMeter is the canonical token pressure calculator.
+type TokenMeter struct {
 	ThresholdRatio float64
 	RetainRatio    float64
 	FallbackLimit  int
 }
 
-// NewDefaultTokenMeter creates a TokenMeter initialized with default ratios (0.80 threshold, 0.16 retain).
-func NewDefaultTokenMeter() *DefaultTokenMeter {
-	return &DefaultTokenMeter{
+// NewTokenMeter creates a TokenMeter initialized with default ratios (0.80 threshold, 0.16 retain).
+func NewTokenMeter() *TokenMeter {
+	return &TokenMeter{
 		ThresholdRatio: DefaultThresholdRatio,
 		RetainRatio:    DefaultRetainRatio,
 		FallbackLimit:  DefaultFallbackLimit,
@@ -81,7 +76,7 @@ func NewDefaultTokenMeter() *DefaultTokenMeter {
 }
 
 // Measure evaluates the header and surface messages to compute request pressure.
-func (m *DefaultTokenMeter) Measure(session *Session, prompt *models.Prompt, contextLimit int) Measurement {
+func (m *TokenMeter) Measure(session *Session, prompt *models.Prompt, contextLimit int) Measurement {
 	limit := contextLimit
 	if limit <= 0 {
 		if m != nil && m.FallbackLimit > 0 {

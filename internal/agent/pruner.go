@@ -29,21 +29,16 @@ func PruneText(content string) (string, bool) {
 	return pruned, true
 }
 
-// ToolResultPruner deterministically prunes oversized visible ToolResults on the active Surface.
-type ToolResultPruner interface {
-	Prune(ctx context.Context, store state.EventStore, session *Session) (int, error)
-}
+// ToolResultPruner implements deterministic ToolResult pruning.
+type ToolResultPruner struct{}
 
-// DefaultToolResultPruner implements deterministic ToolResult pruning.
-type DefaultToolResultPruner struct{}
-
-// NewDefaultToolResultPruner constructs a new ToolResultPruner.
-func NewDefaultToolResultPruner() *DefaultToolResultPruner {
-	return &DefaultToolResultPruner{}
+// NewToolResultPruner constructs a new ToolResultPruner.
+func NewToolResultPruner() *ToolResultPruner {
+	return &ToolResultPruner{}
 }
 
 // Prune scans the active Surface for oversized EventToolResult messages and commits replacement events.
-func (p *DefaultToolResultPruner) Prune(ctx context.Context, store state.EventStore, session *Session) (int, error) {
+func (p *ToolResultPruner) Prune(ctx context.Context, store state.EventStore, session *Session) (int, error) {
 	if session == nil {
 		return 0, nil
 	}

@@ -262,9 +262,7 @@ func TestProviderContractEmptyResponseBecomesFailureEmptyResponse(t *testing.T) 
 	if err == nil {
 		t.Fatal("expected empty response error, got nil")
 	}
-	if !IsMalformedOutput(err) {
-		t.Fatalf("expected IsMalformedOutput to be true for empty response: %v", err)
-	}
+
 	var failure *ProviderFailure
 	if !errors.As(err, &failure) || failure.Code != FailureEmptyResponse {
 		t.Fatalf("expected FailureEmptyResponse, got %v", err)
@@ -520,9 +518,7 @@ func assertToolOnlyCompletion(t *testing.T, comp *Completion, err error) {
 	if err != nil {
 		t.Fatalf("tool-only response rejected: %v", err)
 	}
-	if IsMalformedOutput(err) {
-		t.Fatalf("tool-only classified as malformed: %v", err)
-	}
+
 	if comp.Text != "" || len(comp.ToolCalls) != 1 || comp.ToolCalls[0].ID != "call_search_1" || comp.ToolCalls[0].Name != "search_file_name" {
 		t.Fatalf("completion=%#v", comp)
 	}

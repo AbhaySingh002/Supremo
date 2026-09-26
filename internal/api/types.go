@@ -29,7 +29,7 @@ type Client interface {
 	ConfigureProvider(context.Context, ConfigureProviderRequest) (InitializeResult, error)
 	RefreshProviderMetadata(context.Context) (InitializeResult, error)
 	ProviderUsage(context.Context) (Usage, error)
-	ConfigureEmbeddings(context.Context, ConfigureEmbeddingsRequest) error
+
 	ReloadConfiguration(context.Context) (InitializeResult, error)
 	ListTools(context.Context, SessionRequest) ([]Tool, error)
 	ToolActivity(context.Context, SessionRequest) ([]ToolActivity, error)
@@ -37,8 +37,7 @@ type Client interface {
 	WorkspaceDiff(context.Context) (Diff, error)
 	Health(context.Context) (HealthReport, error)
 	ContextStatus(context.Context, ContextStatusRequest) (ContextStatus, error)
-	IndexStatus(context.Context) (IndexStatus, error)
-	UpdateIndex(context.Context, UpdateIndexRequest) (IndexStatus, error)
+
 	InitializeWorkspace(context.Context) (WorkspaceStatus, error)
 	SubmitPrompt(context.Context, SubmitPromptRequest) (Receipt, error)
 	CancelRun(context.Context, CancelRunRequest) (Run, error)
@@ -81,10 +80,8 @@ const (
 	EventInteractionRequest = "interaction/requested"
 	EventInteractionResolve = "interaction/resolved"
 
-	EventArtifactAvailable  = "artifact.created"
 	EventSessionCreated     = "session.created"
 	EventSessionUpdated     = "session.updated"
-	EventSessionArchived    = "session.archived"
 	EventSubagentDescriptor = "subagent/descriptor"
 	EventSubagentQueued     = "subagent/message.queued"
 	EventSubagentRunStart   = "subagent/run.start"
@@ -330,12 +327,6 @@ type ConfigureProviderRequest struct {
 	Verify   bool    `json:"verify,omitempty"`
 }
 
-type ConfigureEmbeddingsRequest struct {
-	CredentialProvider string `json:"credential_provider"`
-	Endpoint           string `json:"endpoint"`
-	Model              string `json:"model"`
-}
-
 type Usage struct {
 	InputTokens   int      `json:"input_tokens"`
 	OutputTokens  int      `json:"output_tokens"`
@@ -409,18 +400,6 @@ type ContextStatus struct {
 	Rejected        int           `json:"rejected"`
 	ArtifactID      string        `json:"artifact_id,omitempty"`
 	Items           []ContextItem `json:"items,omitempty"`
-}
-
-type IndexStatus struct {
-	Ready      bool   `json:"ready"`
-	Dirty      bool   `json:"dirty"`
-	Semantic   bool   `json:"semantic"`
-	Configured bool   `json:"configured"`
-	Error      string `json:"error,omitempty"`
-}
-
-type UpdateIndexRequest struct {
-	Semantic bool `json:"semantic"`
 }
 
 type TodoItem struct {

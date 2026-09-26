@@ -61,13 +61,6 @@ func IsEnabled() bool {
 	return true
 }
 
-// LogFilePath returns the path to the active log file if enabled.
-func LogFilePath() string {
-	mu.Lock()
-	defer mu.Unlock()
-	return logPath
-}
-
 func writeDirect(entry string) {
 	if logFile == nil {
 		return

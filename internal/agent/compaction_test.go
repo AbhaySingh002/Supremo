@@ -72,7 +72,7 @@ func TestCompactionRangeToolBoundaryBalance(t *testing.T) {
 	_ = session.applyEvent(e4)
 
 	// Measure tokens
-	meter := NewDefaultTokenMeter()
+	meter := NewTokenMeter()
 	meas := meter.Measure(session, nil, 1000)
 
 	// If retainTokens requires retaining through Seq 3, the boundary cannot cut between Seq 1 and Seq 3!
@@ -121,12 +121,12 @@ func TestCompactionLifecycleSuccessAndSurfaceReplacement(t *testing.T) {
 		t.Fatalf("expected 6 nodes before compaction, got %d", len(nodesBefore))
 	}
 
-	meter := NewDefaultTokenMeter()
+	meter := NewTokenMeter()
 	meas := meter.Measure(session, nil, 500) // Small limit -> triggers retention calculation
 
 	summaryContent := "## Primary Request and Intent\n- Goal was achieved\n\n## Next Step\n- Continue testing"
 	mockProv := &mockSummarizerProvider{summaryText: summaryContent}
-	engine := NewDefaultCompactionEngine()
+	engine := NewCompactionEngine()
 
 	success, err := engine.Compact(context.Background(), store, session, mockProv, nil, meas)
 	if err != nil || !success {
@@ -171,12 +171,12 @@ func TestCompactionRejectsOversizedSummary(t *testing.T) {
 	}
 
 	nodesBefore := session.Nodes()
-	meas := NewDefaultTokenMeter().Measure(session, nil, 1000)
+	meas := NewTokenMeter().Measure(session, nil, 1000)
 
 	// Mock summary that is larger than the original messages
 	oversizedSummary := strings.Repeat("Enormous summary text that fails token reduction ", 500)
 	mockProv := &mockSummarizerProvider{summaryText: oversizedSummary}
-	engine := NewDefaultCompactionEngine()
+	engine := NewCompactionEngine()
 
 	success, err := engine.Compact(context.Background(), store, session, mockProv, nil, meas)
 	if success || err == nil {
@@ -210,7 +210,7 @@ func TestCompactionUsesExactFrozenRequestAndRejectsMaxTokens(t *testing.T) {
 	}
 	provider := &mockSummarizerProvider{summaryText: "short summary", finishReason: string(providers.FinishMaxTokens), usage: providers.Usage{InputTokens: 123, OutputTokens: 45}}
 	before := session.Nodes()
-	success, err := NewDefaultCompactionEngine().Compact(context.Background(), store, session, provider, prompt, NewDefaultTokenMeter().Measure(session, prompt, 600))
+	success, err := NewCompactionEngine().Compact(context.Background(), store, session, provider, prompt, NewTokenMeter().Measure(session, prompt, 600))
 	if success || err == nil || !strings.Contains(err.Error(), "max_tokens") {
 		t.Fatalf("max-token compaction success=%t err=%v", success, err)
 	}
@@ -258,7 +258,7 @@ func TestCompactionRejectsSummaryAfterTargetSurfaceChanges(t *testing.T) {
 		mutationErr = appendAndApplySessionEvent(context.Background(), store, session, replacement)
 	}}
 	prompt := &models.Prompt{System: "system", Messages: session.DeriveMessages()}
-	success, err := NewDefaultCompactionEngine().Compact(context.Background(), store, session, provider, prompt, NewDefaultTokenMeter().Measure(session, prompt, 600))
+	success, err := NewCompactionEngine().Compact(context.Background(), store, session, provider, prompt, NewTokenMeter().Measure(session, prompt, 600))
 	if mutationErr != nil {
 		t.Fatal(mutationErr)
 	}

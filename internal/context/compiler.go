@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -443,7 +442,7 @@ func (c *Compiler) RecordObjective(ctx context.Context, sessionID, taskID, objec
 func (c *Compiler) saveObjective(ctx context.Context, request Request) error {
 	id := "objective:" + request.SessionID
 	document, err := c.store.Document(ctx, "objective", id)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err != nil && !errors.Is(err, state.ErrNotFound) {
 		return err
 	}
 	payload, err := json.Marshal(struct {
@@ -500,16 +499,7 @@ func (c *Compiler) candidates(ctx context.Context, request Request, working *Wor
 		}
 	}
 	add(Candidate{ID: "workspace:" + c.store.WorkspaceID(), Kind: "workspace", Layer: LayerPinned, Content: fmt.Sprintf("Workspace identity: %s\nWorkspace root path: %s\nHost platform: %s (%s)", c.store.WorkspaceID(), c.store.Root(), hostPlatformName(), runtime.GOARCH), Authority: state.AuthorityFilesystem, Freshness: FreshCurrent, Pinned: true})
-	for _, kind := range []string{"requirement", "constraint", "assumption"} {
-		claims, err := c.store.Claims(ctx, kind, false)
-		if err != nil {
-			return nil, "", route, err
-		}
-		for _, claim := range claims {
-			add(Candidate{ID: "claim:" + claim.ID, Kind: kind, Layer: LayerPinned, Content: claim.Statement, Authority: claim.Provenance.Authority, Provenance: claim.Provenance, Freshness: FreshCurrent, Pinned: true})
-			working.Items = promote(working.Items, WorkingSetItem{ID: "claim:" + claim.ID, Kind: kind, Pinned: true, LastSeen: working.Generation, PromotedBy: "claim", UpdatedAt: working.UpdatedAt})
-		}
-	}
+
 	taskDocuments, err := c.store.Documents(ctx, "task", request.SessionID)
 	if err != nil {
 		return nil, "", route, err
@@ -1186,7 +1176,7 @@ func selectedItems(candidates []Candidate) []ContextItem {
 func (c *Compiler) loadWorkingSet(ctx context.Context, sessionID, taskID string) (WorkingSet, error) {
 	working := WorkingSet{SchemaVersion: SchemaVersion, SessionID: sessionID, TaskID: taskID}
 	document, err := c.store.Document(ctx, "working_set", workingSetDocumentID(sessionID, taskID))
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, state.ErrNotFound) {
 		return working, nil
 	}
 	if err != nil {
@@ -1200,7 +1190,7 @@ func (c *Compiler) loadWorkingSet(ctx context.Context, sessionID, taskID string)
 
 func (c *Compiler) saveWorkingSet(ctx context.Context, working WorkingSet) error {
 	document, err := c.store.Document(ctx, "working_set", workingSetDocumentID(working.SessionID, working.TaskID))
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err != nil && !errors.Is(err, state.ErrNotFound) {
 		return err
 	}
 	payload, err := json.Marshal(working)
@@ -1215,7 +1205,7 @@ func (c *Compiler) saveWorkingSet(ctx context.Context, working WorkingSet) error
 func (c *Compiler) calibration(ctx context.Context, provider, model string) (Calibration, error) {
 	calibration := Calibration{SchemaVersion: SchemaVersion}
 	document, err := c.store.Document(ctx, "context_calibration", calibrationDocumentID(provider, model))
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, state.ErrNotFound) {
 		return calibration, nil
 	}
 	if err != nil {
@@ -1235,7 +1225,7 @@ func (c *Compiler) recordCalibration(ctx context.Context, manifest Manifest, ses
 		calibration.Samples = calibration.Samples[len(calibration.Samples)-maxCalibrationSamples:]
 	}
 	document, err := c.store.Document(ctx, "context_calibration", calibrationDocumentID(manifest.Provider, manifest.Model))
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err != nil && !errors.Is(err, state.ErrNotFound) {
 		return err
 	}
 	payload, err := json.Marshal(calibration)

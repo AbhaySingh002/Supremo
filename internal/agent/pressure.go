@@ -30,25 +30,25 @@ type PressureResult struct {
 
 // RealContextPressureManager implements ContextPressureManager coordinating TokenMeter, ToolResultPruner, and CompactionEngine.
 type RealContextPressureManager struct {
-	meter      TokenMeter
-	pruner     ToolResultPruner
-	compaction CompactionEngine
+	meter      *TokenMeter
+	pruner     *ToolResultPruner
+	compaction *CompactionEngine
 }
 
 // NewRealContextPressureManager constructs a new RealContextPressureManager.
 func NewRealContextPressureManager(
-	meter TokenMeter,
-	pruner ToolResultPruner,
-	compaction CompactionEngine,
+	meter *TokenMeter,
+	pruner *ToolResultPruner,
+	compaction *CompactionEngine,
 ) *RealContextPressureManager {
 	if meter == nil {
-		meter = NewDefaultTokenMeter()
+		meter = NewTokenMeter()
 	}
 	if pruner == nil {
-		pruner = NewDefaultToolResultPruner()
+		pruner = NewToolResultPruner()
 	}
 	if compaction == nil {
-		compaction = NewDefaultCompactionEngine()
+		compaction = NewCompactionEngine()
 	}
 	return &RealContextPressureManager{
 		meter:      meter,

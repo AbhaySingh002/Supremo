@@ -104,7 +104,7 @@ func (s *Service) Subscribe(ctx context.Context, request api.SubscribeRequest) (
 
 func apiEvent(event state.Event) api.Event {
 	data := event.Payload
-	sessionEvent := event.Type == api.EventSessionCreated || event.Type == api.EventSessionUpdated || event.Type == api.EventSessionArchived
+	sessionEvent := event.Type == api.EventSessionCreated || event.Type == api.EventSessionUpdated
 	if sessionEvent {
 		var session state.Session
 		if json.Unmarshal(event.Payload, &session) == nil {
@@ -163,7 +163,6 @@ func frontendEvent(kind string) bool {
 		sessionlog.EventSubagentDescriptor, sessionlog.EventSubagentQueued, sessionlog.EventSubagentRunStart, sessionlog.EventSubagentRunEnd:
 		return true
 	default:
-		return kind == api.EventSessionCreated || kind == api.EventSessionUpdated || kind == api.EventSessionArchived ||
-			kind == api.EventArtifactAvailable
+		return kind == api.EventSessionCreated || kind == api.EventSessionUpdated
 	}
 }

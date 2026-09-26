@@ -52,15 +52,6 @@ type ConfigurationUpdate struct {
 	Verify   bool
 }
 
-// EmbeddingSettings keeps the global endpoint/model/credential source out of
-// workspace state; only each workspace's opt-in flag is stored locally.
-type EmbeddingSettings struct {
-	CredentialProvider string
-	Endpoint           string
-	Model              string
-	APIKey             string
-}
-
 func NewManager(configDir string, credStore *FileCredentialStore, registry *Registry) (*Manager, error) {
 	if registry == nil {
 		return nil, fmt.Errorf("provider registry is required")
@@ -684,43 +675,6 @@ func (m *Manager) GetRuntimeConfig() *RuntimeConfig {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.runtimeConfig
-}
-
-func (m *Manager) EmbeddingSettings() (EmbeddingSettings, error) {
-	m.mu.RLock()
-	if m.config == nil {
-		m.mu.RUnlock()
-		return EmbeddingSettings{}, fmt.Errorf("manager not initialized")
-	}
-	settings := EmbeddingSettings{CredentialProvider: m.config.EmbeddingCredentialProvider, Endpoint: m.config.EmbeddingEndpoint, Model: m.config.EmbeddingModel}
-	m.mu.RUnlock()
-	if settings.CredentialProvider == "" || settings.Endpoint == "" || settings.Model == "" {
-		return settings, nil
-	}
-	key, err := m.credStore.GetAPIKey(settings.CredentialProvider)
-	if err != nil {
-		return EmbeddingSettings{}, err
-	}
-	settings.APIKey = key
-	return settings, nil
-}
-
-func (m *Manager) UpdateEmbeddingSettings(credentialProvider, endpoint, model string) error {
-	if strings.TrimSpace(credentialProvider) == "" || strings.TrimSpace(endpoint) == "" || strings.TrimSpace(model) == "" {
-		return fmt.Errorf("embedding credential provider, endpoint, and model are required")
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.config == nil {
-		return fmt.Errorf("manager not initialized")
-	}
-	previous := *m.config
-	m.config.EmbeddingCredentialProvider, m.config.EmbeddingEndpoint, m.config.EmbeddingModel = credentialProvider, endpoint, model
-	if err := SaveConfig(m.configDir, m.config); err != nil {
-		*m.config = previous
-		return err
-	}
-	return nil
 }
 
 // ApplyRuntimeOverrides applies CLI or environment settings without changing

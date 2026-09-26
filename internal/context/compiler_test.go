@@ -36,9 +36,7 @@ func TestCompilerPersistsManifestObjectiveAndWorkingSet(t *testing.T) {
 	if _, err := store.AppendMessage(ctx, state.MessageInput{ID: "user", SessionID: "chat", Role: "user", Parts: []state.MessagePartInput{{Kind: "text", Text: "Please make Alpha atomic."}}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.CreateClaim(ctx, state.ClaimInput{ID: "requirement", Kind: "requirement", Statement: "Keep changes transactional", Provenance: state.Provenance{Authority: state.AuthorityUser}}); err != nil {
-		t.Fatal(err)
-	}
+
 	compiler := New(store)
 	if err := compiler.RecordObjective(ctx, "chat", "", "Make Alpha atomic"); err != nil {
 		t.Fatal(err)

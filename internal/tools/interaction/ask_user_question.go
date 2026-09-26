@@ -10,14 +10,6 @@ import (
 	"github.com/AbhaySingh002/supremo/internal/tools"
 )
 
-// WithDelegatedAgent marks context as executing under a delegated subagent.
-func WithDelegatedAgent(ctx context.Context, delegated bool) context.Context {
-	if delegated {
-		return tools.WithDelegated(ctx)
-	}
-	return ctx
-}
-
 func isDelegatedAgent(ctx context.Context) bool {
 	return tools.IsDelegated(ctx)
 }

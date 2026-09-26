@@ -397,7 +397,7 @@ func (m Model) overlayView() string {
 		}
 		return components.Card(m.styles.Overlay, width, m.styles.Title.Render("SIDE QUESTION"), strings.Join(content, "\n"))
 	case surfaceKrypton:
-		body := "This permanently removes .session, .sessions, .scratchpad, and .supremo state/objects from this workspace.\nGlobal credentials are kept.\n\n" + m.overlayInput.View()
+		body := "This clears your current session memory and scratchpad.\n\n" + m.overlayInput.View()
 		if m.overlayError != "" {
 			body += "\n" + m.styles.Error.Render(m.overlayError)
 		}

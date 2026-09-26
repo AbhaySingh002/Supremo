@@ -30,14 +30,11 @@ func configuredEndpoint(config *Config, providerName, fallback string) string {
 
 // Config represents the persisted YAML configuration for Supremo.
 type Config struct {
-	ProviderName                string            `yaml:"provider_name"`
-	Model                       string            `yaml:"model"`
-	Endpoint                    string            `yaml:"endpoint"`
-	Models                      map[string]string `yaml:"models,omitempty"`
-	Endpoints                   map[string]string `yaml:"endpoints,omitempty"`
-	EmbeddingCredentialProvider string            `yaml:"embedding_credential_provider,omitempty"`
-	EmbeddingEndpoint           string            `yaml:"embedding_endpoint,omitempty"`
-	EmbeddingModel              string            `yaml:"embedding_model,omitempty"`
+	ProviderName string            `yaml:"provider_name"`
+	Model        string            `yaml:"model"`
+	Endpoint     string            `yaml:"endpoint"`
+	Models       map[string]string `yaml:"models,omitempty"`
+	Endpoints    map[string]string `yaml:"endpoints,omitempty"`
 }
 
 func (c *Config) normalize() {

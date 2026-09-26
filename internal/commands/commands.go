@@ -46,7 +46,6 @@ const (
 	Model        Kind = "model"
 	Config       Kind = "config"
 	Context      Kind = "context"
-	Index        Kind = "index"
 )
 
 // Intent is a validated command request. Value carries a canonical alias
@@ -145,7 +144,6 @@ func standardCommands() []Command {
 		cmd("/model", "Refresh and choose across configured providers", Model, between(0, 1)),
 		cmd("/config", "View, reload, or update embedding configuration", Config, configArgs),
 		cmd("/context", "Inspect compiled request context", Context, contextArgs),
-		cmd("/index", "Manage semantic repository indexing", Index, indexArgs),
 	}
 }
 
@@ -220,11 +218,4 @@ func contextArgs(args []string) error {
 		return nil
 	}
 	return fmt.Errorf("usage: /context <status|show>")
-}
-
-func indexArgs(args []string) error {
-	if len(args) == 2 && args[0] == "semantic" && (args[1] == "on" || args[1] == "off" || args[1] == "status") {
-		return nil
-	}
-	return fmt.Errorf("usage: /index semantic <on|off|status>")
 }

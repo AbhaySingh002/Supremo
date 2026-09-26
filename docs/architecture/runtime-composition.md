@@ -7,7 +7,7 @@ session-local mutable pieces on demand.
 ~~~text
 cmd/supremo
 → app.NewWithRuntimeOverrides
-  → SQLite state store and repository index
+  → In-memory state store and temporary artifact manager
   → provider registry and provider manager
   → static tool registry, question service, interaction broker
   → durable transcript and context compiler
@@ -21,7 +21,7 @@ cmd/supremo
 
 | Shared per workspace | Isolated per live session |
 | --- | --- |
-| State store, transcript storage, compiler, repository index, provider manager, tool registry, interaction broker | Agent inbox and driver, cancellation, phase, tool manager, pending approval, hooks, observation/repeat state, and progress route |
+| State store, transcript storage, compiler, provider manager, tool registry, interaction broker | Agent inbox and driver, cancellation, phase, tool manager, pending approval, hooks, observation/repeat state, and progress route |
 
 RuntimeManager.For(sessionID) returns the same in-process Agent for repeat
 calls to that session and a different Agent for another session. This lets two

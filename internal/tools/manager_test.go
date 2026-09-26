@@ -565,56 +565,6 @@ func TestManagerApprovalModes(t *testing.T) {
 	}
 }
 
-func TestApprovalModeCanPromoteAnActiveTask(t *testing.T) {
-	write := &managerTestTool{name: "write_file"}
-	registry := NewRegistry()
-	if err := registry.Register(write); err != nil {
-		t.Fatal(err)
-	}
-	manager := NewManager(registry)
-	ctx := WithApprovalMode(context.Background(), ApprovalStrict)
-	waiting := make(chan struct{}, 1)
-	manager.SetReporter(func(event Event) {
-		if event.Status == "waiting approval" {
-			waiting <- struct{}{}
-		}
-	})
-	first := make(chan error, 1)
-	go func() {
-		_, err := manager.Execute(ctx, "write_file", map[string]any{"path": "first.txt"})
-		first <- err
-	}()
-	select {
-	case <-waiting:
-	case <-time.After(time.Second):
-		t.Fatal("strict task did not wait for its first mutation")
-	}
-	if !SetApprovalMode(ctx, ApprovalSuperman) || !manager.Approve() {
-		t.Fatal("could not promote and approve the active task")
-	}
-	if err := <-first; err != nil {
-		t.Fatal(err)
-	}
-	if _, err := manager.Execute(ctx, "write_file", map[string]any{"path": "second.txt"}); err != nil || write.calls != 2 {
-		t.Fatalf("promoted task still asked before later mutations: err=%v calls=%d", err, write.calls)
-	}
-}
-
-func TestDetachedApprovalModeDoesNotChangeParent(t *testing.T) {
-	parent := WithApprovalMode(context.Background(), ApprovalStrict)
-	child := WithDetachedApprovalMode(parent, ApprovalSuperman)
-
-	if got := ApprovalModeFromContext(child); got != ApprovalSuperman {
-		t.Fatalf("child approval mode = %q, want %q", got, ApprovalSuperman)
-	}
-	if got := ApprovalModeFromContext(parent); got != ApprovalStrict {
-		t.Fatalf("detached child changed parent approval mode: got %q, want %q", got, ApprovalStrict)
-	}
-	if !RequiresApprovalFor(parent, ToolDescriptor{Name: "write_file", RequiresApproval: true}, map[string]any{"path": "notes.txt"}) {
-		t.Fatal("strict parent no longer requires approval")
-	}
-}
-
 func TestApprovalPolicyLabelsMatchExecutionModes(t *testing.T) {
 	for _, test := range []struct {
 		mode ApprovalMode

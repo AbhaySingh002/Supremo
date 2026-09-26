@@ -68,8 +68,6 @@ Runtime flags are `--provider`, `--model`, `--endpoint`, and `--api-key`. They a
 | `/doctor` | Check workspace, provider, and tool health without a model request |
 | `/context status` | Show current context totals and state |
 | `/context show` | Open the latest context manifest |
-| `/index semantic status` | Inspect semantic-index configuration |
-| `/index semantic on\|off` | Enable or disable semantic lookup |
 
 ## Configure providers and models
 
@@ -86,7 +84,6 @@ Runtime flags are `--provider`, `--model`, `--endpoint`, and `--api-key`. They a
 | `/usage [refresh]` | Show completion usage and available provider account metadata |
 | `/config` | Show configuration status |
 | `/config reload` | Reload configuration from disk |
-| `/config embeddings credential_provider endpoint model` | Configure an OpenAI-compatible embedding route |
 
 Credentials entered through `/auth` are masked and excluded from transcript history. Selecting **Custom** in `/provider` stores a named `openai-compatible:<name>` route after collecting its endpoint, optional API key, and model. Selecting another unconfigured provider opens endpoint and credential setup before model selection.
 

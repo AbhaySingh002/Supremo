@@ -73,17 +73,12 @@ func FrameSummary(rawSummary string) string {
 	return SummaryFramingPrefix + strings.TrimSpace(rawSummary) + SummaryFramingSuffix
 }
 
-// CompactionEngine manages conversation-prefix compaction.
-type CompactionEngine interface {
-	Compact(ctx context.Context, store state.EventStore, session *Session, provider providers.Provider, prompt *models.Prompt, measurement Measurement) (bool, error)
-}
+// CompactionEngine implements conversation-prefix compaction with safe tool boundaries.
+type CompactionEngine struct{}
 
-// DefaultCompactionEngine implements conversation-prefix compaction with safe tool boundaries.
-type DefaultCompactionEngine struct{}
-
-// NewDefaultCompactionEngine constructs a new DefaultCompactionEngine.
-func NewDefaultCompactionEngine() *DefaultCompactionEngine {
-	return &DefaultCompactionEngine{}
+// NewCompactionEngine constructs a new CompactionEngine.
+func NewCompactionEngine() *CompactionEngine {
+	return &CompactionEngine{}
 }
 
 // SelectCompactionRange determines the safe prefix boundary to compact, retaining the recent tail.
@@ -176,7 +171,7 @@ func balanceToolBoundary(session *Session, nodes []int64, cutoffIdx int) int {
 }
 
 // Compact executes a single LLM summarization request over the candidate prefix and commits a surface replacement.
-func (e *DefaultCompactionEngine) Compact(
+func (e *CompactionEngine) Compact(
 	ctx context.Context,
 	store state.EventStore,
 	session *Session,

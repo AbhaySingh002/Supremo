@@ -303,18 +303,6 @@ func streamText(response *genai.GenerateContentResponse) string {
 	return text.String()
 }
 
-// safeExtractText returns only the response text, never the model's private thoughts.
-func safeExtractText(resp *genai.GenerateContentResponse) (text string, err error) {
-	if resp == nil {
-		return "", fmt.Errorf("model returned no response")
-	}
-	text = streamText(resp)
-	if text == "" {
-		return "", fmt.Errorf("model returned empty text")
-	}
-	return text, nil
-}
-
 // FetchMetadata lists Gemini models and their advertised input context limits.
 func (p *GeminiProvider) FetchMetadata(ctx context.Context) (Metadata, error) {
 	metadata := Metadata{FetchedAt: time.Now().UTC()}

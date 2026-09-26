@@ -123,15 +123,7 @@ func executeCommandCmd(ctx context.Context, client api.Client, registry *command
 		case commands.Context:
 			status, callErr := client.ContextStatus(ctx, api.ContextStatusRequest{SessionID: session.ID, Detailed: intent.Args[0] == "show"})
 			result.err, result.output = callErr, formatContext(status)
-		case commands.Index:
-			var status api.IndexStatus
-			var callErr error
-			if intent.Args[1] == "status" {
-				status, callErr = client.IndexStatus(ctx)
-			} else {
-				status, callErr = client.UpdateIndex(ctx, api.UpdateIndexRequest{Semantic: intent.Args[1] == "on"})
-			}
-			result.err, result.output = callErr, formatIndex(status)
+
 		case commands.Cancel:
 			if !session.PlanModeActive() {
 				result.output = "No run or Plan Mode is active."
@@ -302,11 +294,7 @@ func executeModeIntent(ctx context.Context, client api.Client, result commandRes
 }
 
 func executeConfigIntent(ctx context.Context, client api.Client, result commandResultMsg) commandResultMsg {
-	if len(result.intent.Args) == 4 {
-		result.err = client.ConfigureEmbeddings(ctx, api.ConfigureEmbeddingsRequest{CredentialProvider: result.intent.Args[1], Endpoint: result.intent.Args[2], Model: result.intent.Args[3]})
-		result.output = "Embedding configuration updated."
-		return result
-	}
+
 	var initialized api.InitializeResult
 	if len(result.intent.Args) == 1 {
 		initialized, result.err = client.ReloadConfiguration(ctx)
@@ -456,14 +444,6 @@ func formatContext(value api.ContextStatus) string {
 		fmt.Fprintf(&out, "\n- %s %s: %s (%d tokens, %s)", item.Layer, item.Kind, item.ID, item.Tokens, item.Reason)
 	}
 	return out.String()
-}
-
-func formatIndex(value api.IndexStatus) string {
-	result := fmt.Sprintf("Index: %s%s\nSemantic: %s (embedding provider configured: %t)", map[bool]string{true: "ready", false: "starting"}[value.Ready], map[bool]string{true: ", dirty", false: ""}[value.Dirty], onOff(value.Semantic), value.Configured)
-	if value.Error != "" {
-		result += "\nLast scan error: " + value.Error
-	}
-	return result
 }
 
 func onOff(value bool) string {

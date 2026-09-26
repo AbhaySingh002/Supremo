@@ -1,6 +1,6 @@
 # Supremo
 
-Supremo is a local Go coding agent with a terminal user interface (TUI), durable sessions, deterministic context construction, bounded parallel tools, and isolated subagents. It keeps workspace history in SQLite, streams durable events through one backend contract, and applies session-scoped approval rules before side effects.
+Supremo is a local Go coding agent with a terminal user interface (TUI), durable sessions, deterministic context construction, bounded parallel tools, and isolated subagents. It keeps workspace history in memory and temporary files, streams events through one backend contract, and applies session-scoped approval rules before side effects.
 
 ## Install Supremo
 
@@ -103,7 +103,7 @@ one-shot CLI -> app.AgentAPI -----------------┤
                                              |
                          context compiler | providers | tool scheduler
                                              |
-                                SQLite state + artifact objects
+                                In-memory state + temporary artifacts
 ```
 
 The backend admits runs, enforces idempotency, serves snapshots, and streams ordered events. Each live session receives an isolated agent runtime. A request compiler rebuilds and measures the exact provider-visible envelope before every model call. Safe read operations may overlap, but tool results commit in model order. Delegated agents run as durable child sessions with bounded authority.
@@ -114,13 +114,9 @@ Read [PROJECT.md](PROJECT.md) for package ownership, request flow, recovery beha
 
 Supremo stores configuration under the operating system's user configuration directory in `supremo/`. Set `SUPREMO_DATA_DIR` to choose another location. The directory contains:
 
-- `global.db`: workspace identity registry
 - `config.yaml` and `credentials.json`: provider settings and credentials
-- `workspaces/workspace_id/state.db`: sessions, messages, events, plans, interactions, and repository index
-- `workspaces/workspace_id/objects/`: content-addressed prompt and tool artifacts
-- `workspaces/workspace_id/checkpoints/`: rewind data
 
-Supremo migrates legacy workspace-local `.supremo/` state when it first opens that workspace. It sends prompts, selected workspace evidence, tool observations, and configured web requests to the chosen provider. It has no built-in telemetry. Semantic repository indexing is opt-in because it sends selected source chunks to the configured embedding endpoint.
+Supremo migrates legacy workspace-local `.supremo/` state when it first opens that workspace. It sends prompts, selected workspace evidence, tool observations, and configured web requests to the chosen provider. It has no built-in telemetry.
 
 ## Contribute changes
 

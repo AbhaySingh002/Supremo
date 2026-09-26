@@ -7,7 +7,7 @@ request.
 ## Four layers of memory
 
 ~~~text
-SQLite event log            immutable source of truth
+In-memory event log         immutable source of truth
         ↓ replay
 Session Surface             ordered visible event sequence IDs
         ↓ derive

@@ -12,11 +12,6 @@ func IsEnabled() bool {
 	return false
 }
 
-// LogFilePath returns empty in release builds.
-func LogFilePath() string {
-	return ""
-}
-
 // Info is a no-op in release builds.
 func Info(format string, args ...any) {}
 
@@ -35,6 +30,3 @@ func Recover(contextMsg string) {
 		panic(r)
 	}
 }
-
-// Close is a no-op in release builds.
-func Close() {}

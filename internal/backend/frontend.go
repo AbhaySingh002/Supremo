@@ -126,13 +126,6 @@ func (s *Service) ProviderUsage(_ context.Context) (api.Usage, error) {
 	return result, nil
 }
 
-func (s *Service) ConfigureEmbeddings(_ context.Context, request api.ConfigureEmbeddingsRequest) error {
-	if err := s.providers.UpdateEmbeddingSettings(request.CredentialProvider, request.Endpoint, request.Model); err != nil {
-		return err
-	}
-	return nil
-}
-
 func (s *Service) ReloadConfiguration(ctx context.Context) (api.InitializeResult, error) {
 	if err := s.providers.Initialize(ctx); err != nil {
 		return api.InitializeResult{}, err
@@ -273,14 +266,6 @@ func (s *Service) ContextStatus(ctx context.Context, request api.ContextStatusRe
 		}
 	}
 	return result, nil
-}
-
-func (s *Service) IndexStatus(ctx context.Context) (api.IndexStatus, error) {
-	return api.IndexStatus{}, nil
-}
-
-func (s *Service) UpdateIndex(ctx context.Context, request api.UpdateIndexRequest) (api.IndexStatus, error) {
-	return api.IndexStatus{}, nil
 }
 
 func (s *Service) InitializeWorkspace(ctx context.Context) (api.WorkspaceStatus, error) {
