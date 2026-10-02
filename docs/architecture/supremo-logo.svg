@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 130" width="100%" height="100%">
+  <defs>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FFF0B8"/>
+      <stop offset="35%" stop-color="#F6C453"/>
+      <stop offset="70%" stop-color="#E5A93C"/>
+      <stop offset="100%" stop-color="#C58520"/>
+    </linearGradient>
+    <linearGradient id="cursor" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#F6C453"/>
+      <stop offset="100%" stop-color="#E5A93C"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3.5" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Subtitle Tag -->
+  <g transform="translate(350, 32)" text-anchor="middle">
+    <rect x="-125" y="-14" width="250" height="22" rx="11" fill="#E5A93C" fill-opacity="0.08" stroke="#E5A93C" stroke-opacity="0.3" stroke-width="1"/>
+    <text y="1" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', 'Cascadia Code', monospace" font-size="10" font-weight="700" fill="#E5A93C" letter-spacing="3.5">LOCAL-FIRST AGENT</text>
+  </g>
+
+  <!-- Main Wordmark -->
+  <g transform="translate(350, 92)" text-anchor="middle">
+    <!-- Ambient Glow Shadow -->
+    <text font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif" font-size="58" font-weight="900" fill="#E5A93C" letter-spacing="7" opacity="0.3" filter="url(#glow)">SUPREMO</text>
+    <!-- Crisp Gradient Wordmark -->
+    <text font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif" font-size="58" font-weight="900" fill="url(#gold)" letter-spacing="7">SUPREMO</text>
+    <!-- Terminal Cursor -->
+    <rect x="178" y="-42" width="10" height="44" rx="2" fill="url(#cursor)">
+      <animate attributeName="opacity" values="1;0;1" dur="1.1s" repeatCount="indefinite"/>
+    </rect>
+  </g>
+
+  <!-- Subtle Terminal Brackets -->
+  <path d="M 90 60 L 70 60 L 70 102 L 90 102" fill="none" stroke="#E5A93C" stroke-opacity="0.35" stroke-width="2" stroke-linecap="round"/>
+  <path d="M 610 60 L 630 60 L 630 102 L 610 102" fill="none" stroke="#E5A93C" stroke-opacity="0.35" stroke-width="2" stroke-linecap="round"/>
+</svg>
