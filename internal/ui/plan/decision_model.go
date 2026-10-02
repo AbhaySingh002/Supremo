@@ -115,14 +115,6 @@ func (m *PlanQuestionModel) SetOption(idx int) {
 // Answers returns the recorded answers map.
 func (m *PlanQuestionModel) Answers() map[string]string { return m.answers }
 
-// SetAnswer records an answer for a specific question ID.
-func (m *PlanQuestionModel) SetAnswer(questionID, answer string) {
-	if m.answers == nil {
-		m.answers = make(map[string]string)
-	}
-	m.answers[questionID] = answer
-}
-
 // IsComplete returns true if all questions in the request have been answered.
 func (m *PlanQuestionModel) IsComplete() bool {
 	if len(m.request.Questions) == 0 {
@@ -361,7 +353,7 @@ func (m *PlanQuestionModel) refreshBody() {
 		row = zone.Mark(fmt.Sprintf("plan-option-%d", index), row)
 		m.optionLines = append(m.optionLines, appendBlock(row))
 	}
-	m.body.SetContent(strings.Join(lines, "\n"))
+	m.body.SetContentLines(lines)
 }
 
 func (m *PlanQuestionModel) ensureOptionVisible() {

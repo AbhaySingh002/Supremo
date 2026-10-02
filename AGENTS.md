@@ -48,6 +48,8 @@ Interactive frontends must use `api.Client`. The legacy `app.AgentAPI` exists on
 - Do not use destructive Git commands, overwrite unrelated work, or reformat untouched files
 - Do not add a dependency without explaining why the current modules cannot support the change
 - Keep production builds free of debug logging and keep log redaction intact
+- Do not coerce interactive Bubble Tea widgets (e.g., `bubbles/tree`, `bubbles/table`) for static string-formatting helpers where simple string slices or `strings.Join` already express the output cleanly
+- When refactoring styling or text manipulation to library helpers (such as `lipgloss.StyleRanges`), verify with `go doc -src` whether offsets are byte, rune, or cell-width based before replacing string-building loops
 
 ## Test in proportion to risk
 

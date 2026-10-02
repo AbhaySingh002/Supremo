@@ -27,6 +27,7 @@ func (m Model) View() tea.View {
 		v.KeyboardEnhancements.ReportAlternateKeys = true
 		v.BackgroundColor = m.styles.Background
 		v.ForegroundColor = m.styles.Foreground
+		v.WindowTitle = "Supremo"
 		return v
 	}
 	parts := []string{m.bodyView()}
@@ -66,7 +67,47 @@ func (m Model) View() tea.View {
 	v.BackgroundColor = m.styles.Background
 	v.ForegroundColor = m.styles.Foreground
 	v.Cursor = m.nativeComposerCursor()
+	v.WindowTitle = m.windowTitle()
+	v.ProgressBar = m.terminalProgressBar()
 	return v
+}
+
+func (m Model) windowTitle() string {
+	title := "Supremo"
+	sessionName := m.session.Name
+	if sessionName == "" {
+		sessionName = m.session.ID
+	}
+	if m.active != nil {
+		phase := phaseLabel(m.phase)
+		if phase != "" {
+			if sessionName != "" {
+				return fmt.Sprintf("Supremo [%s] · %s", phase, sessionName)
+			}
+			return fmt.Sprintf("Supremo [%s]", phase)
+		}
+	}
+	if sessionName != "" {
+		return "Supremo · " + sessionName
+	}
+	return title
+}
+
+func (m Model) terminalProgressBar() *tea.ProgressBar {
+	if m.active != nil {
+		return tea.NewProgressBar(tea.ProgressBarIndeterminate, 0)
+	}
+	if m.contextLimit > 0 {
+		used := m.inputTokens + m.outputTokens
+		pct := min(100, max(0, int((float64(used)/float64(m.contextLimit))*100)))
+		if pct > 0 {
+			if pct >= 90 {
+				return tea.NewProgressBar(tea.ProgressBarWarning, pct)
+			}
+			return tea.NewProgressBar(tea.ProgressBarDefault, pct)
+		}
+	}
+	return nil
 }
 
 func (m Model) bodyView() string {
@@ -230,7 +271,7 @@ func (m Model) composerView() string {
 }
 
 func (m Model) nativeComposerCursor() *tea.Cursor {
-	if m.surface != surfaceNone || m.focus != focusComposer || !m.input.Focused() || (m.selection != nil && m.selection.input && m.selection.active()) {
+	if !m.terminalFocused || m.surface != surfaceNone || m.focus != focusComposer || !m.input.Focused() || (m.selection != nil && m.selection.input && m.selection.active()) {
 		return nil
 	}
 	layout := m.composerLayout()
@@ -429,9 +470,7 @@ func highlightSelection(content string, selection *textSelection, style lipgloss
 		if right <= left {
 			continue
 		}
-		lines[row] = ansi.Cut(lines[row], 0, left) +
-			style.Render(ansi.Strip(ansi.Cut(lines[row], left, right))) +
-			ansi.Cut(lines[row], right, width)
+		lines[row] = lipgloss.StyleRanges(lines[row], lipgloss.NewRange(left, right, style))
 	}
 	return strings.Join(lines, "\n")
 }

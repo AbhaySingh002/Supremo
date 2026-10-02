@@ -289,18 +289,20 @@ type Model struct {
 	height         int
 	composerTopRow int
 	spinner        spinner.Model
+	spinnerTicking bool
 	initialFocus   tea.Cmd
 	keys           KeyMap
 	help           help.Model
 	styles         rendering.Styles
 
-	active        *activeTask
-	cancelling    bool
-	quitWhenIdle  bool
-	nextTaskID    int
-	showDebug     bool
-	workspaceInfo workspaceState
-	tokenBar      progress.Model
+	active          *activeTask
+	cancelling      bool
+	quitWhenIdle    bool
+	nextTaskID      int
+	showDebug       bool
+	terminalFocused bool
+	workspaceInfo   workspaceState
+	tokenBar        progress.Model
 }
 
 func (m *Model) openProviderSelector() {
@@ -396,7 +398,7 @@ func (m *Model) refreshModelCatalog() tea.Cmd {
 	m.surface, m.catalogBusy, m.catalogNote = surfaceModel, true, ""
 	m.input.Blur()
 	m.layout()
-	return tea.Batch(listModelsCmd(m.ctx, m.client, true), m.spinner.Tick)
+	return tea.Batch(listModelsCmd(m.ctx, m.client, true), m.startSpinner())
 }
 
 func (m *Model) openModelSelector() bool {
@@ -588,6 +590,10 @@ func New(client api.Client, workspace, sessionID string, options Options) Model 
 	}
 	overlayIn.SetStyles(overlayStyles)
 
+	diffVp := viewport.New(viewport.WithWidth(72), viewport.WithHeight(18))
+	diffVp.MouseWheelEnabled = true
+	diffVp.MouseWheelDelta = 2
+
 	tokenBar := progress.New(progress.WithWidth(10), progress.WithoutPercentage(), progress.WithDefaultBlend())
 	m := Model{
 		chatModel: chatModel{
@@ -603,27 +609,28 @@ func New(client api.Client, workspace, sessionID string, options Options) Model 
 		},
 		activityModel: activityModel{},
 		surfaceState: surfaceState{
-			diffViewport: viewport.New(viewport.WithWidth(72), viewport.WithHeight(18)),
+			diffViewport: diffVp,
 			diffEntry:    -1,
 			overlayList:  overlayList,
 			overlayInput: overlayIn,
 			focus:        focusComposer,
 			priorFocus:   focusComposer,
 		},
-		client:    client,
-		registry:  registry,
-		ctx:       ctx,
-		shutdown:  options.Shutdown,
-		purge:     options.Purge,
-		workspace: workspace,
-		session:   session,
-		spinner:   spinner.New(spinner.WithSpinner(activitySpinner), spinner.WithStyle(styles.Accent)),
-		keys:      newKeyMap(),
-		help:      h,
-		styles:    styles,
-		tokenBar:  tokenBar,
-		width:     80,
-		height:    24,
+		client:          client,
+		registry:        registry,
+		ctx:             ctx,
+		shutdown:        options.Shutdown,
+		purge:           options.Purge,
+		workspace:       workspace,
+		session:         session,
+		spinner:         spinner.New(spinner.WithSpinner(activitySpinner), spinner.WithStyle(styles.Accent)),
+		keys:            newKeyMap(),
+		help:            h,
+		styles:          styles,
+		tokenBar:        tokenBar,
+		width:           80,
+		height:          24,
+		terminalFocused: true,
 	}
 	m.initialFocus = m.input.Focus()
 	m.debug = options.Debug
@@ -985,13 +992,21 @@ func (m *Model) setTodos(items []api.TodoItem) {
 	m.rebuildFeed()
 }
 
+func (m *Model) startSpinner() tea.Cmd {
+	if m.spinnerTicking {
+		return nil
+	}
+	m.spinnerTicking = true
+	return m.spinner.Tick
+}
+
 func (m *Model) waitForProvider() tea.Cmd {
 	if m.planDraft || m.session.PlanModeActive() {
 		m.setStatus("Planning…")
 	} else {
 		m.setStatus("Thinking…")
 	}
-	return m.spinner.Tick
+	return m.startSpinner()
 }
 
 func (m *Model) clearLiveStatus() {
@@ -1545,7 +1560,7 @@ func (m *Model) startCommand(input string) tea.Cmd {
 	if strings.HasPrefix(input, "/plan") {
 		m.setStatus("Planning…")
 	}
-	return tea.Batch(executeCommandCmd(ctx, m.client, m.registry, m.session, input, id), m.spinner.Tick)
+	return tea.Batch(executeCommandCmd(ctx, m.client, m.registry, m.session, input, id), m.startSpinner())
 }
 
 func (m *Model) startShell(command string) tea.Cmd {
@@ -1560,7 +1575,7 @@ func (m *Model) startShell(command string) tea.Cmd {
 	m.noteOutput()
 	m.rebuildFeed()
 	m.setStatus("Running local shell command…")
-	return tea.Batch(terminal.RunShellCmd(ctx, m.workspace, command, id), m.spinner.Tick)
+	return tea.Batch(terminal.RunShellCmd(ctx, m.workspace, command, id), m.startSpinner())
 }
 
 func approvalModeCommand(input string) (string, bool) {

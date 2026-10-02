@@ -87,12 +87,6 @@ func NewApprovalModel(tool, arguments string, st rendering.Styles) *ApprovalMode
 	}
 }
 
-// Tool returns the pending tool name.
-func (m *ApprovalModel) Tool() string { return m.tool }
-
-// Arguments returns the tool arguments.
-func (m *ApprovalModel) Arguments() string { return m.arguments }
-
 // IsDeciding returns whether approval submission is in flight.
 func (m *ApprovalModel) IsDeciding() bool { return m.deciding }
 
@@ -259,10 +253,9 @@ func (m *ApprovalModel) View(width, maxHeight int) string {
 				}
 			}
 		}
-		content = strings.Join(styledLines, "\n")
 		m.body.SetWidth(innerWidth)
-		m.body.SetHeight(min(availableBody, max(1, lipgloss.Height(content))))
-		m.body.SetContent(content)
+		m.body.SetHeight(min(availableBody, max(1, len(styledLines))))
+		m.body.SetContentLines(styledLines)
 		argBody = m.body.View()
 	}
 

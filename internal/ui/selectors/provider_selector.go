@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -11,6 +12,32 @@ import (
 
 	"github.com/AbhaySingh002/supremo/internal/ui/theme"
 )
+
+// KeyMap defines the keybindings recognized by ProviderSelector.
+type KeyMap struct {
+	Up       key.Binding
+	Down     key.Binding
+	Select   key.Binding
+	Dismiss  key.Binding
+	Home     key.Binding
+	End      key.Binding
+	PageUp   key.Binding
+	PageDown key.Binding
+}
+
+// DefaultKeyMap returns the default keybindings for ProviderSelector.
+func DefaultKeyMap() KeyMap {
+	return KeyMap{
+		Up:       key.NewBinding(key.WithKeys("up", "ctrl+p", "ctrl+k"), key.WithHelp("↑", "up")),
+		Down:     key.NewBinding(key.WithKeys("down", "ctrl+n", "ctrl+j"), key.WithHelp("↓", "down")),
+		Select:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
+		Dismiss:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "close")),
+		Home:     key.NewBinding(key.WithKeys("home")),
+		End:      key.NewBinding(key.WithKeys("end")),
+		PageUp:   key.NewBinding(key.WithKeys("pgup")),
+		PageDown: key.NewBinding(key.WithKeys("pgdown")),
+	}
+}
 
 // Provider is a provider or model option displayed by ProviderSelector.
 type Provider struct {
@@ -57,6 +84,7 @@ type ProviderSelector struct {
 	width        int
 	height       int
 	compact      bool
+	KeyMap       KeyMap
 }
 
 // NewProviderSelector creates a searchable provider selection model.
@@ -118,6 +146,7 @@ func newSelector(options []Provider, design theme.Theme, title, label string, is
 		model:        isModel,
 		width:        72,
 		height:       18,
+		KeyMap:       DefaultKeyMap(),
 	}
 	selector.SetSize(72, 18)
 	return selector
@@ -155,7 +184,7 @@ func (m ProviderSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		switch {
-		case msg.Code == tea.KeyEsc || msg.String() == "esc":
+		case key.Matches(msg, m.KeyMap.Dismiss):
 			if m.search.Value() != "" {
 				m.search.Reset()
 				m.cursor = 0
@@ -164,7 +193,7 @@ func (m ProviderSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, func() tea.Msg { return ProviderSelectorDismissedMsg{} }
 
-		case msg.Code == tea.KeyEnter || msg.String() == "enter":
+		case key.Matches(msg, m.KeyMap.Select):
 			flatItems := m.flatVisibleItems()
 			if len(flatItems) > 0 && m.cursor >= 0 && m.cursor < len(flatItems) {
 				item := flatItems[m.cursor]
@@ -175,36 +204,36 @@ func (m ProviderSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case msg.Code == tea.KeyUp || msg.String() == "up" || (msg.Mod == tea.ModCtrl && (msg.Code == 'p' || msg.Code == 'k')):
+		case key.Matches(msg, m.KeyMap.Up):
 			flatItems := m.flatVisibleItems()
 			if len(flatItems) > 0 {
 				m.cursor = max(0, m.cursor-1)
 			}
 			return m, nil
 
-		case msg.Code == tea.KeyDown || msg.String() == "down" || (msg.Mod == tea.ModCtrl && (msg.Code == 'n' || msg.Code == 'j')):
+		case key.Matches(msg, m.KeyMap.Down):
 			flatItems := m.flatVisibleItems()
 			if len(flatItems) > 0 {
 				m.cursor = min(len(flatItems)-1, m.cursor+1)
 			}
 			return m, nil
 
-		case msg.Code == tea.KeyHome:
+		case key.Matches(msg, m.KeyMap.Home):
 			m.cursor = 0
 			return m, nil
 
-		case msg.Code == tea.KeyEnd:
+		case key.Matches(msg, m.KeyMap.End):
 			flatItems := m.flatVisibleItems()
 			if len(flatItems) > 0 {
 				m.cursor = len(flatItems) - 1
 			}
 			return m, nil
 
-		case msg.Code == tea.KeyPgUp:
+		case key.Matches(msg, m.KeyMap.PageUp):
 			m.cursor = max(0, m.cursor-5)
 			return m, nil
 
-		case msg.Code == tea.KeyPgDown:
+		case key.Matches(msg, m.KeyMap.PageDown):
 			flatItems := m.flatVisibleItems()
 			if len(flatItems) > 0 {
 				m.cursor = min(len(flatItems)-1, m.cursor+5)

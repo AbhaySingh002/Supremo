@@ -68,7 +68,11 @@ func newCredentialSetupWithMode(provider api.Provider, styles rendering.Styles, 
 	endpoint.SetWidth(60)
 	key := textinput.New()
 	key.Prompt = "api key   "
-	key.Placeholder = map[bool]string{true: "optional for local servers", false: "paste credential"}[custom]
+	if custom {
+		key.Placeholder = "optional for local servers"
+	} else {
+		key.Placeholder = "paste credential"
+	}
 	key.EchoMode = textinput.EchoPassword
 	key.EchoCharacter = '•'
 	key.SetWidth(60)

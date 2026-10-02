@@ -75,7 +75,7 @@ func (m *Model) openSideOverlay(query string) tea.Cmd {
 	if query != "" {
 		m.overlayInput.SetValue(query)
 		m.sideLoading = true
-		return tea.Batch(sideAnswerCmd(m.ctx, m.client, m.session.ID, query), m.spinner.Tick)
+		return tea.Batch(sideAnswerCmd(m.ctx, m.client, m.session.ID, query), m.startSpinner())
 	}
 	return m.overlayInput.Focus()
 }

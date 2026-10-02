@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/AbhaySingh002/supremo/internal/api"
@@ -104,18 +105,15 @@ func loadWorkspaceDiffCmd(ctx context.Context, client api.Client) tea.Cmd {
 }
 
 func (m Model) updateDiffInspector(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if msg.String() == "esc" || msg.Code == tea.KeyEsc {
+	switch {
+	case key.Matches(msg, m.keys.Viewer.Close):
 		return m, m.closeDiffInspector()
-	}
-	switch msg.String() {
-	case "home", "g":
+	case key.Matches(msg, m.keys.Viewer.Top):
 		m.diffViewport.GotoTop()
 		return m, nil
-	case "end", "G":
+	case key.Matches(msg, m.keys.Viewer.Bottom):
 		m.diffViewport.GotoBottom()
 		return m, nil
-	case "q":
-		return m, m.closeDiffInspector()
 	}
 	var cmd tea.Cmd
 	m.diffViewport, cmd = m.diffViewport.Update(msg)

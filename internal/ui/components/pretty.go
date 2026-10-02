@@ -80,7 +80,7 @@ func prettyObject(values map[string]any) string {
 			lines = append(lines, table)
 		}
 	}
-	if todos := ParseTodos(mustJSON(values)); len(todos) > 0 {
+	if todos := ParseTodosFromObject(values); len(todos) > 0 {
 		lines = append(lines, Todos(todos))
 	}
 	for _, collection := range []struct{ key, label string }{
@@ -303,14 +303,6 @@ func truncate(value string, limit int) string {
 		return strings.TrimSpace(value)
 	}
 	return ansi.Truncate(strings.TrimSpace(value), limit, "…")
-}
-
-func mustJSON(values map[string]any) string {
-	data, err := json.Marshal(values)
-	if err != nil {
-		return ""
-	}
-	return string(data)
 }
 
 // ToolsTable renders a tool catalog (name, policy, description).

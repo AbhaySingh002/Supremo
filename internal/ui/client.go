@@ -377,7 +377,7 @@ func (m *Model) applyAPIEvent(event api.Event) tea.Cmd {
 		var payload api.InteractionEvent
 		if json.Unmarshal(event.Data, &payload) == nil {
 			m.openInteraction(api.Interaction{ID: payload.InteractionID, SessionID: event.SessionID, RunID: payload.RunID, Kind: payload.Kind, Status: "pending", Data: payload.Data})
-			return m.spinner.Tick
+			return m.startSpinner()
 		}
 	case api.EventInteractionResolve:
 		var payload api.InteractionEvent

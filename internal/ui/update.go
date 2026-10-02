@@ -170,7 +170,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resetComposer()
 		m.collapseCompletedToolBatches()
 		m.setStatus("Queued for execution")
-		return m, m.spinner.Tick
+		return m, m.startSpinner()
 	case cancelRunResultMsg:
 		if msg.err != nil {
 			m.cancelling = false
@@ -200,20 +200,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applySnapshot(msg.snapshot)
 		cmds := []tea.Cmd{m.renderMarkdown(), m.restoreComposerAfterWork()}
 		if m.active != nil || m.approval != nil {
-			cmds = append(cmds, m.spinner.Tick)
+			if tickCmd := m.startSpinner(); tickCmd != nil {
+				cmds = append(cmds, tickCmd)
+			}
 		}
 		return m, tea.Batch(cmds...)
+	case tea.FocusMsg:
+		m.terminalFocused = true
+		if m.focus == focusComposer {
+			return m, m.input.Focus()
+		}
+		return m, nil
+	case tea.BlurMsg:
+		m.terminalFocused = false
+		return m, nil
 	case spinner.TickMsg:
 		credentialBusy := m.credential != nil && m.credential.loading
 		activeWork := m.active != nil || m.approval != nil || m.sideLoading || m.catalogBusy || credentialBusy
 		if !activeWork {
+			m.spinnerTicking = false
 			return m, nil
 		}
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		if cmd == nil && activeWork {
-			cmd = m.spinner.Tick
+		if cmd == nil {
+			// Charm's internal tag filtering dropped an extraneous/stale tick.
+			// Do not resurrect it with m.spinner.Tick, as that spawns multiple concurrent loops.
+			return m, nil
 		}
+		m.spinnerTicking = true
 		for i := range m.entries {
 			liveRow := m.entries[i].kind == entryStatus && (i == m.liveEntry || (m.active != nil && i == m.intentEntry))
 			runningRow := m.entries[i].kind == entryTool && strings.EqualFold(m.entries[i].toolStatus, "running")
@@ -673,7 +688,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			model := msg.model
 			request.Model = &model
 		}
-		return m, tea.Batch(configureProviderCmd(m.ctx, m.client, request, msg.openModels), m.spinner.Tick)
+		return m, tea.Batch(configureProviderCmd(m.ctx, m.client, request, msg.openModels), m.startSpinner())
 	case credentialCancelledMsg:
 		if m.credential != nil {
 			m.credential.clear()
@@ -747,7 +762,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.providerSelector = nil
 		providerID := provider.ID
 		m.surface, m.catalogBusy = surfaceProvider, true
-		return m, tea.Batch(configureProviderCmd(m.ctx, m.client, api.ConfigureProviderRequest{Provider: &providerID}, false), m.spinner.Tick)
+		return m, tea.Batch(configureProviderCmd(m.ctx, m.client, api.ConfigureProviderRequest{Provider: &providerID}, false), m.startSpinner())
 	case selectors.ProviderSelectorDismissedMsg:
 		m.providerSelector, m.modelSelector = nil, nil
 		m.surface = surfaceNone
@@ -757,7 +772,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.modelSelector = nil
 		m.surface, m.catalogBusy = surfaceModel, true
 		providerID, modelID := msg.ProviderID, msg.ID
-		return m, tea.Batch(configureProviderCmd(m.ctx, m.client, api.ConfigureProviderRequest{Provider: &providerID, Model: &modelID}, false), m.spinner.Tick)
+		return m, tea.Batch(configureProviderCmd(m.ctx, m.client, api.ConfigureProviderRequest{Provider: &providerID, Model: &modelID}, false), m.startSpinner())
 	case selectors.CommandQueryMsg:
 		if m.paletteOpen {
 			updated, cmd := m.palette.Update(msg)
@@ -875,7 +890,7 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.rebuildFeed()
 		return m, nil
 	}
-	if key.Matches(msg, m.keys.Composer.Clear) || msg.String() == "ctrl+l" {
+	if key.Matches(msg, m.keys.Composer.Clear) {
 		if m.active != nil {
 			m.setStatus("Cannot clear the transcript while a task is running.")
 			return m, nil
@@ -1090,16 +1105,16 @@ func selectionDeleteKey(msg tea.KeyPressMsg, input textarea.Model) bool {
 func (m Model) scrollTranscript(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 		switch {
-		case key.Matches(keyMsg, m.keys.Feed.Top) || keyMsg.String() == "home":
+		case key.Matches(keyMsg, m.keys.Feed.Top):
 			m.followTail = false
 			m.feed.GotoTop()
 			return m, nil
-		case key.Matches(keyMsg, m.keys.Feed.Bottom) || keyMsg.String() == "end":
+		case key.Matches(keyMsg, m.keys.Feed.Bottom):
 			m.followTail = true
 			m.newOutput = 0
 			m.feed.GotoBottom()
 			return m, nil
-		case key.Matches(keyMsg, m.keys.Feed.PgUp, m.keys.Feed.PgDown) || keyMsg.String() == "pgup" || keyMsg.String() == "pgdown":
+		case key.Matches(keyMsg, m.keys.Feed.PgUp, m.keys.Feed.PgDown):
 			m.followTail = false
 		}
 	}
@@ -1867,20 +1882,6 @@ func (m *Model) openLatestToolDetails() (bool, tea.Cmd) {
 func (m *Model) toggleLatestTool() bool {
 	opened, _ := m.openLatestToolDetails()
 	return opened
-}
-
-func (m Model) hasLatestToolDetails() bool {
-	for index := len(m.entries) - 1; index >= 0; index-- {
-		entry := m.entries[index]
-		if entry.kind == entryThought && entry.content != "" {
-			return true
-		}
-		runningCommand := toolFamilyFor(entry.tool) == toolCommand && strings.EqualFold(entry.toolStatus, "running")
-		if entry.kind == entryTool && toolHasDetails(entry, runningCommand) {
-			return true
-		}
-	}
-	return false
 }
 
 func (m *Model) toggleLatestToolBatch() bool {

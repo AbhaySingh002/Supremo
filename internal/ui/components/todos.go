@@ -4,10 +4,9 @@ import (
 	"strings"
 
 	"github.com/AbhaySingh002/supremo/internal/api"
-	"github.com/AbhaySingh002/supremo/internal/parser/models"
 )
 
-// Todos renders a standing TODO list as a lipgloss tree.
+// Todos renders a standing TODO list as indented bullet lines.
 func Todos(items []api.TodoItem) string {
 	if len(items) == 0 {
 		return ""
@@ -32,6 +31,11 @@ func ParseTodos(raw string) []api.TodoItem {
 	if !ok {
 		return nil
 	}
+	return ParseTodosFromObject(values)
+}
+
+// ParseTodosFromObject extracts todo items directly from a decoded object map.
+func ParseTodosFromObject(values map[string]any) []api.TodoItem {
 	list, ok := values["todos"].([]any)
 	if !ok {
 		return nil
@@ -51,20 +55,4 @@ func ParseTodos(raw string) []api.TodoItem {
 		out = append(out, api.TodoItem{Content: content, Status: status})
 	}
 	return out
-}
-
-// Checklist renders a turn checklist as a bubbles table.
-func Checklist(list *models.TaskChecklist) string {
-	if list == nil || len(list.Steps) == 0 {
-		return ""
-	}
-	rows := make([][]string, 0, len(list.Steps))
-	for _, step := range list.Steps {
-		rows = append(rows, []string{step.Status, step.Label})
-	}
-	title := strings.TrimSpace(list.Title)
-	if title == "" {
-		title = "Checklist"
-	}
-	return title + "\n" + renderTable([]string{"Status", "Step"}, rows)
 }
