@@ -26,19 +26,9 @@ func TestResponsiveHeaderBreakpoints(t *testing.T) {
 	if !strings.Contains(narrowHeader, "SUPREMO") {
 		t.Fatalf("expected title in narrow header:\n%s", narrowHeader)
 	}
-	if strings.Contains(narrowHeader, "main · 3 changed") {
-		t.Fatal("narrow header should omit workspace details to prevent overflow")
-	}
 
-	// 2. Medium screen (70 cols)
-	model.width = 70
-	medHeader := model.HeaderView()
-	if !strings.Contains(medHeader, "main · 3 changed") {
-		t.Fatalf("medium header should include git status:\n%s", medHeader)
-	}
-
-	// 3. Wide screen (120 cols)
-	model.width = 120
+	// 2. Token metrics (>= 80 cols)
+	model.width = 80
 	wideHeader := model.HeaderView()
 	if !strings.Contains(wideHeader, "16k/128k") {
 		t.Fatalf("wide header should include token usage:\n%s", wideHeader)

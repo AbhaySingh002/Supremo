@@ -8,25 +8,28 @@ import (
 // ComposerKeyMap defines keybindings for the composer input view.
 type ComposerKeyMap struct {
 	Submit      key.Binding
+	Details     key.Binding
+	Stop        key.Binding
+	Help        key.Binding
+	Scroll      key.Binding
 	Newline     key.Binding
 	Complete    key.Binding
 	Plans       key.Binding
 	ToggleMode  key.Binding
 	ToggleDebug key.Binding
 	Clear       key.Binding
-	Help        key.Binding
 	Cancel      key.Binding
 }
 
 func (k ComposerKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Submit, k.Complete, k.Plans, k.Help}
+	return []key.Binding{k.Stop, k.Help}
 }
 
 func (k ComposerKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Submit, k.Newline, k.Complete},
-		{k.Plans, k.ToggleMode, k.ToggleDebug},
-		{k.Clear, k.Help, k.Cancel},
+		{k.Scroll, k.Details},
+		{k.Stop, k.Submit},
+		{k.Help, k.Cancel},
 	}
 }
 
@@ -73,21 +76,6 @@ func (k PlanDraftKeyMap) FullHelp() [][]key.Binding {
 		{k.Submit, k.Exit},
 		{k.Plans, k.Help},
 	}
-}
-
-// PlanReadyKeyMap defines keybindings when a plan is approved and ready.
-type PlanReadyKeyMap struct {
-	Execute key.Binding
-	Plans   key.Binding
-	Help    key.Binding
-}
-
-func (k PlanReadyKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Execute, k.Plans, k.Help}
-}
-
-func (k PlanReadyKeyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Execute, k.Plans, k.Help}}
 }
 
 // PlanQuestionKeyMap defines keybindings when answering interactive questions.
@@ -203,7 +191,6 @@ type KeyMap struct {
 	Composer     ComposerKeyMap
 	Feed         FeedKeyMap
 	PlanDraft    PlanDraftKeyMap
-	PlanReady    PlanReadyKeyMap
 	PlanQuestion PlanQuestionKeyMap
 	Approval     ApprovalKeyMap
 	Selector     SelectorKeyMap
@@ -215,7 +202,6 @@ type KeyMap struct {
 var _ help.KeyMap = ComposerKeyMap{}
 var _ help.KeyMap = FeedKeyMap{}
 var _ help.KeyMap = PlanDraftKeyMap{}
-var _ help.KeyMap = PlanReadyKeyMap{}
 var _ help.KeyMap = PlanQuestionKeyMap{}
 var _ help.KeyMap = ApprovalKeyMap{}
 var _ help.KeyMap = SelectorKeyMap{}
@@ -227,15 +213,18 @@ var _ help.KeyMap = StreamingKeyMap{}
 func newKeyMap() KeyMap {
 	return KeyMap{
 		Composer: ComposerKeyMap{
-			Submit:      key.NewBinding(key.WithKeys("enter"), key.WithHelp("↵", "send")),
+			Submit:      key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "send")),
+			Details:     key.NewBinding(key.WithKeys("ctrl+j", "ctrl+o"), key.WithHelp("ctrl+j", "details")),
+			Stop:        key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "stop")),
+			Help:        key.NewBinding(key.WithKeys("f1"), key.WithHelp("F1", "help")),
+			Scroll:      key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑↓", "scroll")),
 			Newline:     key.NewBinding(key.WithKeys("shift+enter", "alt+enter", "ctrl+enter", "cmd+enter", "super+enter", "meta+enter", "opt+enter", "option+enter", "esc+enter", "esc+return", "shift+return", "alt+return", "ctrl+return", "cmd+return", "super+return", "meta+return", "opt+return", "option+return", "ctrl+j", "ctrl+o"), key.WithHelp("ctrl+j / \\+↵", "line")),
 			Complete:    key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "complete")),
 			Plans:       key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "plans")),
 			ToggleMode:  key.NewBinding(key.WithKeys("ctrl+m"), key.WithHelp("ctrl+m", "mode")),
 			ToggleDebug: key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "debug")),
 			Clear:       key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("ctrl+l", "clear")),
-			Help:        key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
-			Cancel:      key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "cancel")),
+			Cancel:      key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "exit")),
 		},
 		Feed: FeedKeyMap{
 			ScrollUp:   key.NewBinding(key.WithKeys("up"), key.WithHelp("↑", "scroll up")),
@@ -247,19 +236,14 @@ func newKeyMap() KeyMap {
 			Copy:       key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "copy")),
 			Evidence:   key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "evidence")),
 			Expand:     key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("ctrl+o", "open")),
-			Clear:      key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear")),
+			Clear:      key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 			FocusInput: key.NewBinding(key.WithKeys("ctrl+n"), key.WithHelp("ctrl+n", "input")),
 		},
 		PlanDraft: PlanDraftKeyMap{
 			Submit: key.NewBinding(key.WithKeys("enter"), key.WithHelp("↵", "create plan")),
 			Exit:   key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "exit plan")),
 			Plans:  key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "saved plans")),
-			Help:   key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
-		},
-		PlanReady: PlanReadyKeyMap{
-			Execute: key.NewBinding(key.WithKeys("ctrl+x"), key.WithHelp("ctrl+x", "execute")),
-			Plans:   key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "saved plans")),
-			Help:    key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
+			Help:   key.NewBinding(key.WithKeys("f1"), key.WithHelp("F1", "help")),
 		},
 		PlanQuestion: PlanQuestionKeyMap{
 			PickNumber:  key.NewBinding(key.WithKeys("1", "2", "3", "4", "5", "6", "7", "8", "9"), key.WithHelp("1-9", "pick")),
@@ -301,7 +285,7 @@ func newKeyMap() KeyMap {
 		},
 		Streaming: StreamingKeyMap{
 			Stop: key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "stop task")),
-			Help: key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
+			Help: key.NewBinding(key.WithKeys("f1"), key.WithHelp("F1", "help")),
 		},
 	}
 }

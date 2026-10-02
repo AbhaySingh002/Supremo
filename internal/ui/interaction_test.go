@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -121,10 +122,10 @@ func TestCollapsedShellCommandBranchClickOpensDetails(t *testing.T) {
 	_ = model.View()
 
 	toolZone := zone.Get("tool-0")
-	if toolZone == nil || toolZone.EndY <= toolZone.StartY {
-		t.Fatalf("collapsed shell command did not expose a two-line click zone: %#v", toolZone)
+	if toolZone == nil || toolZone.EndY < toolZone.StartY {
+		t.Fatalf("collapsed shell command did not expose a click zone: %#v", toolZone)
 	}
-	updated, _ := model.Update(tea.MouseClickMsg(tea.Mouse{X: toolZone.StartX + 1, Y: toolZone.EndY, Button: tea.MouseLeft}))
+	updated, _ := model.Update(tea.MouseClickMsg(tea.Mouse{X: toolZone.StartX + 1, Y: toolZone.StartY, Button: tea.MouseLeft}))
 	model = updated.(Model)
 	if !model.entries[0].expanded {
 		t.Fatal("clicking the shell command branch did not open details")
@@ -317,5 +318,35 @@ func TestToolRowClickAndAttachedFilesDisplay(t *testing.T) {
 		if !model.entries[1].expanded {
 			t.Fatal("expected tool row click anywhere on row to expand details")
 		}
+	}
+}
+
+func TestRunEndSubmitsQueuedInput(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	model := newTestModel(api.Session{ID: "queue-run-end"}, ctx, cancel)
+	model.active = &activeTask{id: 1, kind: taskAgent, runID: "run-1"}
+	model.cancelling = true
+	model.queuedInput = "follow up after cancel"
+
+	run, err := json.Marshal(api.Run{RunID: "run-1", Status: "cancelled"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, cmd := model.Update(clientEventMsg{epoch: 0, open: true, event: api.Event{Cursor: 1, SessionID: model.session.ID, Type: api.EventRunEnd, Data: run}})
+	model = updated.(Model)
+
+	if model.queuedInput != "" {
+		t.Fatal("queued input should be cleared on run end")
+	}
+	if model.active == nil || model.active.kind != taskAgent {
+		t.Fatal("run end with queued input should start a new task")
+	}
+	if model.pendingInput != "follow up after cancel" {
+		t.Fatalf("pending input = %q, want queued message", model.pendingInput)
+	}
+	if cmd == nil {
+		t.Fatal("expected submit command for the queued input")
 	}
 }

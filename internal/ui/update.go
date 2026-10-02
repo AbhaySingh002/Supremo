@@ -88,7 +88,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.flushStreaming()
 		return m, nil
 	case terminationDeadlineMsg:
-		if !m.quitWhenIdle || m.active == nil {
+		if !m.quitWhenIdle {
 			return m, nil
 		}
 		if m.shutdown != nil {
@@ -198,15 +198,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.applySnapshot(msg.snapshot)
-		return m, tea.Batch(m.renderMarkdown(), m.restoreComposerAfterWork())
+		cmds := []tea.Cmd{m.renderMarkdown(), m.restoreComposerAfterWork()}
+		if m.active != nil || m.approval != nil {
+			cmds = append(cmds, m.spinner.Tick)
+		}
+		return m, tea.Batch(cmds...)
 	case spinner.TickMsg:
 		credentialBusy := m.credential != nil && m.credential.loading
-		if m.active == nil && (m.approval == nil || !m.approval.IsDeciding()) && !m.sideLoading && !m.catalogBusy && !credentialBusy {
+		activeWork := m.active != nil || m.approval != nil || m.sideLoading || m.catalogBusy || credentialBusy
+		if !activeWork {
 			return m, nil
 		}
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		m.refreshLiveFeed()
+		if cmd == nil && activeWork {
+			cmd = m.spinner.Tick
+		}
+		for i := range m.entries {
+			liveRow := m.entries[i].kind == entryStatus && (i == m.liveEntry || (m.active != nil && i == m.intentEntry))
+			runningRow := m.entries[i].kind == entryTool && strings.EqualFold(m.entries[i].toolStatus, "running")
+			if liveRow || runningRow {
+				m.entries[i].dirty = true
+			}
+		}
+		m.rebuildFeed()
 		return m, cmd
 	case tea.MouseMsg:
 		if m.surface == surfaceModel && m.modelSelector != nil {
@@ -350,7 +365,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			if index := m.runningToolIndex(progressEvent{Tool: "local_shell"}); index >= 0 {
 				m.entries[index].toolStatus = "failed"
-				m.entries[index].content = formatToolSummary(m.entries[index].tool, m.entries[index].toolStatus, m.entries[index].arguments)
+				m.entries[index].content = m.formatToolSummary(m.entries[index].tool, m.entries[index].toolStatus, m.entries[index].arguments)
 				m.entries[index].details = msg.Err.Error()
 				m.entries[index].detailOffset = 0
 				m.entries[index].dirty = true
@@ -358,9 +373,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.noteOutput()
 				m.rebuildFeed()
 			} else {
-				entry := newLocalShellEntry(msg.Command)
+				entry := m.newLocalShellEntry(msg.Command)
 				entry.toolStatus = "failed"
-				entry.content = formatToolSummary(entry.tool, entry.toolStatus, entry.arguments)
+				entry.content = m.formatToolSummary(entry.tool, entry.toolStatus, entry.arguments)
 				entry.details = msg.Err.Error()
 				m.entries = append(m.entries, entry)
 			}
@@ -387,7 +402,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		details += fmt.Sprintf("exit %d", msg.Output.ExitCode)
 		if index := m.runningToolIndex(progressEvent{Tool: "local_shell"}); index >= 0 {
 			m.entries[index].toolStatus = status
-			m.entries[index].content = formatToolSummary(m.entries[index].tool, m.entries[index].toolStatus, m.entries[index].arguments)
+			m.entries[index].content = m.formatToolSummary(m.entries[index].tool, m.entries[index].toolStatus, m.entries[index].arguments)
 			m.entries[index].details = shellToolDetails(details)
 			m.entries[index].detailOffset = 0
 			m.entries[index].dirty = true
@@ -395,9 +410,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.liveEntry = -1
 			}
 		} else {
-			entry := newLocalShellEntry(msg.Command)
+			entry := m.newLocalShellEntry(msg.Command)
 			entry.toolStatus = status
-			entry.content = formatToolSummary(entry.tool, entry.toolStatus, entry.arguments)
+			entry.content = m.formatToolSummary(entry.tool, entry.toolStatus, entry.arguments)
 			entry.details = shellToolDetails(details)
 			m.entries = append(m.entries, entry)
 		}
@@ -421,7 +436,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.overlayList.SetItems(items)
 	case conversationLoadedMsg:
 		m.session = msg.session
-		m.entries = transcriptFromMessages(msg.messages)
+		m.entries = m.transcriptFromMessages(msg.messages)
 		m.collapsedToolBatches = make(map[string]bool)
 		m.todos = todosFromMessages(msg.messages)
 		if len(m.todos) > 0 {
@@ -436,7 +451,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setStatus("Switched to " + msg.session.Name + ".")
 		}
-		return m, m.renderMarkdown()
+		if m.surface == surfaceSessions {
+			m.surface = surfaceNone
+			m.layout()
+		}
+		return m, tea.Batch(m.renderMarkdown(), m.restoreFocus())
 	case sessionDeletedMsg:
 		if msg.err != nil {
 			m.overlayError = msg.err.Error()
@@ -458,9 +477,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.sideAnswer, m.overlayError = msg.answer, ""
-		m.input.Reset()
-		m.input.Placeholder = "Ask another side question"
-		return m, m.input.Focus()
+		m.overlayInput.Reset()
+		m.overlayInput.Placeholder = "Ask another side question"
+		return m, m.overlayInput.Focus()
 	case kryptonResultMsg:
 		if msg.err != nil {
 			m.overlayError = msg.err.Error()
@@ -826,7 +845,7 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.updateDiffInspector(msg)
 	}
 	if m.surface == surfaceHelp {
-		if msg.String() == "esc" || msg.Code == tea.KeyEsc || msg.String() == "?" {
+		if msg.String() == "esc" || msg.Code == tea.KeyEsc || msg.String() == "f1" {
 			m.surface = surfaceNone
 			m.layout()
 			return m, m.restoreFocus()
@@ -844,7 +863,7 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.setPlanDraft(false)
 		return m, m.input.Focus()
 	}
-	if (key.Matches(msg, m.keys.Composer.Help) || msg.String() == "?") && strings.TrimSpace(m.input.Value()) == "" {
+	if key.Matches(msg, m.keys.Composer.Help) && strings.TrimSpace(m.input.Value()) == "" {
 		m.priorFocus, m.focus = m.focus, focusOverlay
 		m.surface = surfaceHelp
 		m.input.Blur()
@@ -857,6 +876,10 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if key.Matches(msg, m.keys.Composer.Clear) || msg.String() == "ctrl+l" {
+		if m.active != nil {
+			m.setStatus("Cannot clear the transcript while a task is running.")
+			return m, nil
+		}
 		m.entries = nil
 		m.collapsedToolBatches = make(map[string]bool)
 		m.feed.SetContent("")
@@ -891,7 +914,7 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 		}
-		if key.Matches(msg, m.keys.Feed.Expand) {
+		if key.Matches(msg, m.keys.Feed.Expand) || msg.String() == "ctrl+j" || msg.String() == "ctrl+o" {
 			if opened, cmd := m.openLatestToolDetails(); opened {
 				return m, cmd
 			}
@@ -973,10 +996,13 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.paletteOpen && key.Matches(msg, m.keys.Composer.Submit) && !m.exactCommandInput() {
 		return m.completeSelectedCommand()
 	}
-	if key.Matches(msg, m.keys.Feed.Expand) && strings.TrimSpace(m.input.Value()) == "" {
+	if (key.Matches(msg, m.keys.Feed.Expand) || msg.String() == "ctrl+j" || msg.String() == "ctrl+o") && strings.TrimSpace(m.input.Value()) == "" {
 		if opened, cmd := m.openLatestToolDetails(); opened {
 			return m, cmd
 		}
+	}
+	if (msg.String() == "esc" || msg.Code == tea.KeyEsc) && m.active != nil {
+		return m.cancelOrQuit(false)
 	}
 	if isNewlineKey(msg, m.keys, m.input) {
 		m.input.InsertString("\n")
@@ -1194,11 +1220,19 @@ func (m Model) updatePlanQuestionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.approval == nil || m.approval.IsDeciding() {
+	if m.approval == nil {
+		return m, nil
+	}
+	if m.approval.IsDeciding() {
+		if msg.String() == "esc" || msg.Code == tea.KeyEsc {
+			m.approval.SetDeciding(false)
+			m.layout()
+		}
 		return m, nil
 	}
 	var cmd tea.Cmd
 	m.approval, cmd = m.approval.Update(msg)
+	m.layout()
 	if cmd != nil {
 		actionMsg := cmd()
 		if act, ok := actionMsg.(approval.ApprovalActionMsg); ok {
@@ -1289,11 +1323,11 @@ func (m Model) submitInput() (tea.Model, tea.Cmd) {
 			m.appendEntry(entryCommand, displayCommand(input))
 			return m, executeCommandCmd(m.ctx, m.client, m.registry, m.session, input, 0)
 		case m.cancelling:
-			if m.pendingInput != "" {
+			if m.queuedInput != "" {
 				m.appendEntry(entryStatus, "One message is already queued until cancellation is complete.")
 				return m, nil
 			}
-			m.pendingInput = input
+			m.queuedInput = input
 			m.resetComposer()
 			m.appendEntry(entryStatus, "Message queued until cancellation is complete.")
 			return m, nil
@@ -1454,6 +1488,9 @@ func (m *Model) applyProgress(event progressEvent) tea.Cmd {
 	switch event.Kind {
 	case progressStream:
 		return m.appendStreamingChunk(event.Message)
+	case progressThought:
+		m.appendThoughtChunk(event.Message)
+		return nil
 	case progressDebug:
 		m.appendEntry(entryDebug, event.Message)
 	case progressActivity:
@@ -1483,6 +1520,7 @@ func (m *Model) applyProgress(event progressEvent) tea.Cmd {
 			m.surface = surfaceApproval
 			m.priorFocus, m.focus = m.focus, focusOverlay
 			m.input.Blur()
+			m.layout()
 			return nil
 		}
 		m.recordToolEvent(event)
@@ -1551,18 +1589,20 @@ func (m *Model) recordToolEvent(event progressEvent) {
 	if len(m.activity) > 32 {
 		m.activity = m.activity[len(m.activity)-32:]
 	}
-	label := m.conciseToolLabel(event.Tool, event.ToolStatus, event.Arguments)
 	if event.Tool == "todo_write" {
 		if items := components.ParseTodos(event.ToolOutput); len(items) > 0 {
 			m.setTodos(items)
 		} else if items := components.ParseTodos(event.Arguments); len(items) > 0 {
 			m.setTodos(items)
 		}
+		return
 	}
+	label := m.conciseToolLabel(event.Tool, event.ToolStatus, event.Arguments)
 	switch event.ToolStatus {
 	case "waiting approval":
+		m.foldStreamingIntoActivity()
 		entry := newToolEntry("Approval required — "+label, event)
-		entry.details = approvalToolDetails(event)
+		entry.details = m.approvalToolDetails(event)
 		m.entries = append(m.entries, entry)
 		m.noteOutput()
 		m.rebuildFeed()
@@ -1575,16 +1615,19 @@ func (m *Model) recordToolEvent(event progressEvent) {
 			m.rebuildFeed()
 			return
 		}
-		m.entries = append(m.entries, newToolEntry("Approved — "+label, event))
+		entry := newToolEntry("Approved — "+label, event)
+		m.entries = append(m.entries, entry)
 		m.noteOutput()
 		m.rebuildFeed()
 	case "running":
-		m.clearLiveStatus()
-		m.entries = append(m.entries, newToolEntry(label, event))
-		m.noteOutput()
-		if m.active != nil {
-			m.liveEntry = len(m.entries) - 1
+		folded := m.foldStreamingIntoActivity()
+		if !folded && (m.activityText == "Working..." || m.activityText == "Preparing response" || m.activityText == "") {
+			m.setStatus("Running " + label + "…")
 		}
+		entry := newToolEntry(label, event)
+		entry.startTime = time.Now()
+		m.entries = append(m.entries, entry)
+		m.noteOutput()
 		m.rebuildFeed()
 	case "completed", "failed", "denied":
 		if event.ToolStatus == "denied" {
@@ -1599,6 +1642,9 @@ func (m *Model) recordToolEvent(event progressEvent) {
 		}
 		if index := m.runningToolIndex(event); index >= 0 {
 			entry := &m.entries[index]
+			if !entry.startTime.IsZero() {
+				entry.duration = time.Since(entry.startTime)
+			}
 			if event.Tool != "" {
 				entry.tool = event.Tool
 			}
@@ -1606,20 +1652,21 @@ func (m *Model) recordToolEvent(event progressEvent) {
 			if event.Arguments != "" {
 				entry.arguments = event.Arguments
 			}
-			entry.content = formatToolSummary(entry.tool, entry.toolStatus, entry.arguments)
+			entry.content = m.formatToolSummary(entry.tool, entry.toolStatus, entry.arguments)
 			details := toolDetails(event)
 			if details != "" || entry.details == "" {
 				entry.details = details
 			}
+			populateToolMetrics(entry, event)
+			entry.dirty = true
 			m.noteOutput()
-			if m.liveEntry == index {
-				m.liveEntry = -1
-			}
 			m.appendDiff(event.Diff)
 			m.rebuildFeed()
 			return
 		}
-		m.entries = append(m.entries, newToolEntry(label, event))
+		entry := newToolEntry(label, event)
+		populateToolMetrics(&entry, event)
+		m.entries = append(m.entries, entry)
 		m.noteOutput()
 		m.appendDiff(event.Diff)
 		m.rebuildFeed()
@@ -1704,12 +1751,12 @@ func (m Model) zoneInRow(id string, x, y int) bool {
 	return y >= z.StartY && y <= z.EndY && x >= 0 && x <= max(z.EndX, feedWidth)
 }
 
-func approvalToolDetails(event progressEvent) string {
+func (m Model) approvalToolDetails(event progressEvent) string {
 	title := approval.FormatPrompt(event.Tool, event.Arguments)
 	if toolFamilyFor(event.Tool) == toolCommand {
-		return title + "\n" + toolInvocation(event.Tool, event.Arguments)
+		return title + "\n" + m.toolInvocation(event.Tool, event.Arguments)
 	}
-	summary := formatToolSummary(event.Tool, event.ToolStatus, event.Arguments)
+	summary := m.formatToolSummary(event.Tool, event.ToolStatus, event.Arguments)
 	if summary != "" && summary != event.Tool && summary != strings.ReplaceAll(event.Tool, "_", " ") {
 		return title + "\n" + summary
 	}
@@ -1721,7 +1768,42 @@ func approvalToolDetails(event progressEvent) string {
 }
 
 func newToolEntry(label string, event progressEvent) transcriptEntry {
-	return transcriptEntry{kind: entryTool, content: label, tool: event.Tool, toolStatus: event.ToolStatus, details: toolDetails(event), arguments: event.Arguments, toolCallID: event.CallID, toolBatchID: event.toolBatchID()}
+	entry := transcriptEntry{
+		kind:        entryTool,
+		content:     label,
+		tool:        event.Tool,
+		toolStatus:  event.ToolStatus,
+		details:     toolDetails(event),
+		arguments:   event.Arguments,
+		toolCallID:  event.CallID,
+		toolBatchID: event.toolBatchID(),
+		startTime:   time.Now(),
+	}
+	populateToolMetrics(&entry, event)
+	return entry
+}
+
+func populateToolMetrics(entry *transcriptEntry, event progressEvent) {
+	if entry.linesCount == 0 {
+		if content := toolArgument(entry.arguments, "content"); content != "" {
+			entry.linesCount = strings.Count(content, "\n") + 1
+		} else if event.Diff != "" {
+			entry.linesCount = strings.Count(event.Diff, "\n")
+		}
+	}
+	if entry.matchCount == 0 && (toolFamilyFor(entry.tool) == toolSearch || entry.tool == "glob") {
+		if event.ToolOutput != "" {
+			var list []any
+			if json.Unmarshal([]byte(event.ToolOutput), &list) == nil {
+				entry.matchCount = len(list)
+			} else {
+				lines := strings.Split(strings.TrimSpace(event.ToolOutput), "\n")
+				if len(lines) > 0 && lines[0] != "" {
+					entry.matchCount = len(lines)
+				}
+			}
+		}
+	}
 }
 
 func (event progressEvent) toolBatchID() string {
@@ -1761,6 +1843,13 @@ func (m *Model) openToolDetails(index int) tea.Cmd {
 func (m *Model) openLatestToolDetails() (bool, tea.Cmd) {
 	for index := len(m.entries) - 1; index >= 0; index-- {
 		entry := m.entries[index]
+		if entry.kind == entryThought && entry.content != "" {
+			m.entries[index].expanded = !m.entries[index].expanded
+			m.entries[index].dirty = true
+			m.invalidateFeedPrefix()
+			m.rebuildFeed()
+			return true, nil
+		}
 		runningCommand := toolFamilyFor(entry.tool) == toolCommand && strings.EqualFold(entry.toolStatus, "running")
 		if entry.kind == entryTool && toolHasDetails(entry, runningCommand) {
 			if indices := m.toolBatchIndices(entry.toolBatchID); len(indices) > 1 && m.collapsedToolBatches[entry.toolBatchID] {
@@ -1783,6 +1872,9 @@ func (m *Model) toggleLatestTool() bool {
 func (m Model) hasLatestToolDetails() bool {
 	for index := len(m.entries) - 1; index >= 0; index-- {
 		entry := m.entries[index]
+		if entry.kind == entryThought && entry.content != "" {
+			return true
+		}
 		runningCommand := toolFamilyFor(entry.tool) == toolCommand && strings.EqualFold(entry.toolStatus, "running")
 		if entry.kind == entryTool && toolHasDetails(entry, runningCommand) {
 			return true
@@ -1914,7 +2006,7 @@ func (m *Model) updateMouseSelection(msg tea.MouseMsg) (bool, tea.Cmd) {
 }
 
 func (m Model) composerTop() int {
-	return m.composerTopRow + m.styles.ComposerFocused.GetBorderTopSize() + m.styles.ComposerFocused.GetPaddingTop() + 1
+	return m.composerTopRow + 1
 }
 
 func (m *Model) positionComposerDragCursor(msg tea.MouseMsg) (tea.MouseMsg, bool, tea.Cmd) {

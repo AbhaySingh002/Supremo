@@ -36,24 +36,11 @@ type RealContextPressureManager struct {
 }
 
 // NewRealContextPressureManager constructs a new RealContextPressureManager.
-func NewRealContextPressureManager(
-	meter *TokenMeter,
-	pruner *ToolResultPruner,
-	compaction *CompactionEngine,
-) *RealContextPressureManager {
-	if meter == nil {
-		meter = NewTokenMeter()
-	}
-	if pruner == nil {
-		pruner = NewToolResultPruner()
-	}
-	if compaction == nil {
-		compaction = NewCompactionEngine()
-	}
+func NewRealContextPressureManager() *RealContextPressureManager {
 	return &RealContextPressureManager{
-		meter:      meter,
-		pruner:     pruner,
-		compaction: compaction,
+		meter:      &TokenMeter{},
+		pruner:     &ToolResultPruner{},
+		compaction: &CompactionEngine{},
 	}
 }
 

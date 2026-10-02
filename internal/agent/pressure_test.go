@@ -65,7 +65,7 @@ func TestContextPressureManagerBelowThresholdNoOp(t *testing.T) {
 	_ = session.applyEvent(e0)
 
 	mockProv := &mockSummarizerProvider{summaryText: "summary"}
-	mgr := NewRealContextPressureManager(nil, nil, nil)
+	mgr := NewRealContextPressureManager()
 
 	_, err = mgr.BeforeStep(context.Background(), store, session, mockProv, nil, 100_000)
 	if err != nil {
@@ -113,7 +113,7 @@ func TestContextPressureManagerPruningSufficientNoCompaction(t *testing.T) {
 	// Context Limit 3200 tokens (Threshold = 2560 tokens). Total before pruning = ~3050 tokens (pressured).
 	// After pruning (~5120 chars -> ~1300 tokens), total = ~1350 tokens (well below 2560).
 	mockProv := &mockSummarizerProvider{summaryText: "summary"}
-	mgr := NewRealContextPressureManager(nil, nil, nil)
+	mgr := NewRealContextPressureManager()
 
 	result, err := mgr.BeforeStep(context.Background(), store, session, mockProv, nil, 3200)
 	if err != nil {
@@ -161,7 +161,7 @@ func TestContextPressureManagerCompactionWhenPruningInsufficient(t *testing.T) {
 
 	// Context Limit 1000 tokens (Threshold = 800 tokens). Messages = ~1400 tokens.
 	mockProv := &mockSummarizerProvider{summaryText: "## Primary Request and Intent\n- All tasks consolidated."}
-	mgr := NewRealContextPressureManager(nil, nil, nil)
+	mgr := NewRealContextPressureManager()
 
 	result, err := mgr.BeforeStep(context.Background(), store, session, mockProv, nil, 1000)
 	if err != nil {
@@ -216,7 +216,7 @@ func TestContextPressureManagerRecoverOverflow(t *testing.T) {
 	_ = session.applyEvent(e2)
 
 	mockProv := &mockSummarizerProvider{summaryText: "## Primary Request and Intent\n- Compacted."}
-	mgr := NewRealContextPressureManager(nil, nil, nil)
+	mgr := NewRealContextPressureManager()
 
 	// Simulate overflow trigger
 	recovered, err := mgr.RecoverOverflow(context.Background(), store, session, mockProv, nil, 3200)

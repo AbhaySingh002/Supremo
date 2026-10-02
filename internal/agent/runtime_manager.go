@@ -215,29 +215,12 @@ func (m *RuntimeManager) CancelSession(sessionID string) bool {
 	return false
 }
 
-func (m *RuntimeManager) ApproveSession(sessionID string) bool {
-	return m.resolveSessionApproval(sessionID, func(runtime *Agent) bool { return runtime.ApprovePendingTool() })
-}
-
-func (m *RuntimeManager) ApproveSessionWithInput(sessionID string, input any) bool {
-	return m.resolveSessionApproval(sessionID, func(runtime *Agent) bool { return runtime.ApprovePendingToolWithInput(input) })
-}
-
-func (m *RuntimeManager) DenySession(sessionID, reason string) bool {
-	return m.resolveSessionApproval(sessionID, func(runtime *Agent) bool { return runtime.DenyPendingTool(reason) })
-}
-
 func (m *RuntimeManager) ResolveApprovalSession(sessionID, interactionID string, resolution tools.ApprovalResolution) error {
 	runtime := m.existing(sessionID)
 	if runtime == nil {
 		return fmt.Errorf("session runtime is not active")
 	}
 	return runtime.ResolvePendingTool(interactionID, resolution)
-}
-
-func (m *RuntimeManager) resolveSessionApproval(sessionID string, resolve func(*Agent) bool) bool {
-	runtime := m.existing(sessionID)
-	return runtime != nil && runtime.hasPendingApproval() && resolve(runtime)
 }
 
 func (m *RuntimeManager) ApprovePendingTool() bool {
@@ -324,6 +307,15 @@ func (m *RuntimeManager) emitProgress(event ProgressEvent) {
 	}
 }
 
+// EmitProgress broadcasts an ephemeral lifecycle event to active progress subscribers.
+func (m *RuntimeManager) EmitProgress(event ProgressEvent) {
+	if m != nil {
+		m.emitProgress(event)
+	}
+}
+
+// routeProgress tags events from one session runtime before they reach the
+// shared manager sink.
 func routeProgress(sessionID string, report func(ProgressEvent)) func(ProgressEvent) {
 	if report == nil {
 		return nil

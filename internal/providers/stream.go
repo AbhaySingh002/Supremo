@@ -49,8 +49,9 @@ type rawToolCallAccumulator struct {
 // AssistantAssembler is the canonical assembler that accumulates normalized stream events
 // into exactly one valid assistant Completion.
 type AssistantAssembler struct {
-	activeTools []string
-	listener    func(string)
+	activeTools       []string
+	listener          func(string)
+	reasoningListener func(string)
 
 	textBuilder      strings.Builder
 	reasoningBuilder strings.Builder
@@ -63,10 +64,16 @@ type AssistantAssembler struct {
 
 // NewAssistantAssembler constructs a new stream assembler.
 func NewAssistantAssembler(activeTools []string, listener func(string)) *AssistantAssembler {
+	return NewAssistantAssemblerWithReasoning(activeTools, listener, nil)
+}
+
+// NewAssistantAssemblerWithReasoning constructs a new stream assembler with an optional reasoning listener.
+func NewAssistantAssemblerWithReasoning(activeTools []string, listener func(string), reasoningListener func(string)) *AssistantAssembler {
 	return &AssistantAssembler{
-		activeTools: activeTools,
-		listener:    listener,
-		toolCalls:   make(map[int]*rawToolCallAccumulator),
+		activeTools:       activeTools,
+		listener:          listener,
+		reasoningListener: reasoningListener,
+		toolCalls:         make(map[int]*rawToolCallAccumulator),
 	}
 }
 
@@ -87,6 +94,9 @@ func (a *AssistantAssembler) Feed(event StreamEvent) error {
 	case StreamEventReasoningDelta:
 		if event.ReasoningDelta != "" {
 			a.reasoningBuilder.WriteString(event.ReasoningDelta)
+			if a.reasoningListener != nil {
+				a.reasoningListener(event.ReasoningDelta)
+			}
 		}
 	case StreamEventToolCallDelta:
 		if event.ToolCall != nil {
@@ -108,7 +118,15 @@ func (a *AssistantAssembler) Feed(event StreamEvent) error {
 		}
 	case StreamEventUsage:
 		if event.Usage != nil {
-			a.usage = *event.Usage
+			if event.Usage.InputTokens > 0 {
+				a.usage.InputTokens = event.Usage.InputTokens
+			}
+			if event.Usage.OutputTokens > 0 {
+				a.usage.OutputTokens = event.Usage.OutputTokens
+			}
+			if event.Usage.CostUSD != nil {
+				a.usage.CostUSD = event.Usage.CostUSD
+			}
 		}
 	case StreamEventFinish:
 		if event.FinishReason != "" {

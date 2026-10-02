@@ -19,23 +19,41 @@ import (
 
 const openRouterEndpoint = "https://openrouter.ai/api/v1"
 
-// OpenRouterProvider uses the official OpenRouter SDK without streaming.
+// OpenRouterProvider implements model routing via OpenRouter with native streaming.
 type OpenRouterProvider struct {
-	client *openrouter.OpenRouter
-	model  string
+	client     *openrouter.OpenRouter
+	httpClient *http.Client
+	endpoint   string
+	apiKey     string
+	model      string
 }
 
 func NewOpenRouterProvider(_ context.Context, apiKey, model, endpoint string) (*OpenRouterProvider, error) {
 	if endpoint == "" {
 		endpoint = openRouterEndpoint
 	}
+	httpClient := &http.Client{Timeout: 60 * time.Second}
 	client := openrouter.New(
 		openrouter.WithSecurity(apiKey),
 		openrouter.WithServerURL(endpoint),
-		openrouter.WithClient(&http.Client{Timeout: 60 * time.Second}),
+		openrouter.WithClient(httpClient),
 		openrouter.WithRetryConfig(retry.Config{Strategy: "none"}),
 	)
-	return &OpenRouterProvider{client: client, model: model}, nil
+	return &OpenRouterProvider{client: client, httpClient: httpClient, endpoint: endpoint, apiKey: apiKey, model: model}, nil
+}
+
+// Stream translates OpenRouter server-sent events into canonical events.
+func (p *OpenRouterProvider) Stream(ctx context.Context, prompt *models.Prompt, receive func(StreamEvent) error) error {
+	req := openAIChatRequest{
+		Model:    p.model,
+		Messages: openAIChatMessages(prompt),
+		Tools:    openAITools(prompt.ToolDefinitions),
+		Stream:   true,
+	}
+	if err := streamOpenAICompatible(ctx, p.httpClient, apiURL(p.endpoint, "chat/completions"), p.apiKey, "text/event-stream", req, receive); err != nil {
+		return fmt.Errorf("openrouter streaming execution: %w", err)
+	}
+	return nil
 }
 
 func (p *OpenRouterProvider) chatRequest(prompt *models.Prompt) components.ChatRequest {

@@ -108,12 +108,14 @@ func (m Model) updateDiffInspector(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.closeDiffInspector()
 	}
 	switch msg.String() {
-	case "home":
+	case "home", "g":
 		m.diffViewport.GotoTop()
 		return m, nil
-	case "end":
+	case "end", "G":
 		m.diffViewport.GotoBottom()
 		return m, nil
+	case "q":
+		return m, m.closeDiffInspector()
 	}
 	var cmd tea.Cmd
 	m.diffViewport, cmd = m.diffViewport.Update(msg)

@@ -14,8 +14,8 @@ import (
 
 type runtimeLifecycle struct{}
 
-func (runtimeLifecycle) Compile(_ context.Context, request ContextRequest) (*models.Prompt, error) {
-	return &models.Prompt{System: request.Session.ID}, nil
+func (runtimeLifecycle) Prepare(_ context.Context, request ContextRequest) (*PreparedContext, error) {
+	return &PreparedContext{Prompt: &models.Prompt{System: request.Session.ID}}, nil
 }
 func (runtimeLifecycle) RecordObjective(context.Context, string, string, string) error { return nil }
 func (runtimeLifecycle) RecordUsage(context.Context, *models.Prompt, providers.Usage) error {
@@ -171,7 +171,7 @@ func TestRuntimeManagerRoutesApprovalsAndDeniesAmbiguousLegacyApproval(t *testin
 	if m.ApprovePendingTool() {
 		t.Fatal("ambiguous legacy approval was accepted")
 	}
-	if !m.ApproveSession("a") || !m.DenySession("b", "no") {
+	if !a.ApprovePendingTool() || !b.DenyPendingTool("no") {
 		t.Fatal("session-scoped approval routing failed")
 	}
 	wait.Wait()

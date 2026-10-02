@@ -35,6 +35,20 @@ func NewMistralProvider(_ context.Context, apiKey, model, endpoint string) (*Mis
 	return &MistralProvider{client: &http.Client{Timeout: 60 * time.Second}, endpoint: endpoint, apiKey: apiKey, model: model}, nil
 }
 
+// Stream translates Mistral server-sent events into canonical events.
+func (p *MistralProvider) Stream(ctx context.Context, prompt *models.Prompt, receive func(StreamEvent) error) error {
+	req := openAIChatRequest{
+		Model:    p.model,
+		Messages: openAIChatMessages(prompt),
+		Tools:    openAITools(prompt.ToolDefinitions),
+		Stream:   true,
+	}
+	if err := streamOpenAICompatible(ctx, p.client, apiURL(p.endpoint, "chat/completions"), p.apiKey, "text/event-stream", req, receive); err != nil {
+		return fmt.Errorf("mistral streaming execution: %w", err)
+	}
+	return nil
+}
+
 type mistralMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`

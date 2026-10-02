@@ -83,7 +83,7 @@ func NewApprovalModel(tool, arguments string, st rendering.Styles) *ApprovalMode
 		body:      body,
 		styles:    st,
 		keys:      DefaultKeyMap,
-		choice:    approvalDeny,
+		choice:    approvalAllow,
 	}
 }
 
@@ -214,72 +214,106 @@ func (m *ApprovalModel) choiceAction() tea.Cmd {
 	}
 }
 
-// View renders a compact, keyboard-first approval decision sheet.
-func (m *ApprovalModel) View(width, height int) string {
-	width = max(20, width)
-	inner := max(16, width-2)
+// View renders the approval card docked above the composer. The card spans
+// the available width; maxHeight caps its height so the transcript above
+// stays visible, with long argument bodies scrolling inside the budget.
+func (m *ApprovalModel) View(width, maxHeight int) string {
+	cardWidth := max(36, width)
+	innerWidth := max(16, cardWidth-6)
 
-	rule := strings.Repeat("─", width)
+	border := lipgloss.RoundedBorder()
 	if m.styles.Ascii {
-		rule = strings.Repeat("-", width)
+		border = lipgloss.NormalBorder()
 	}
-	badge := m.styles.ApprovalDanger.Render("Approval required")
-	promptText := FormatPrompt(m.tool, m.arguments)
-	prompt := m.styles.Text.Bold(true).Render(ansi.Hardwrap(promptText, inner, true))
-	choices := m.choiceView()
-	footer := m.styles.Muted.Render("↑↓ or 1–4 choose · Enter decide · Esc deny")
-	compact := height < 16
-	preamble := []string{m.styles.Muted.Render(rule), badge, prompt, ""}
-	trailer := []string{m.styles.Text.Render("Do you want to proceed?"), choices, "", footer}
-	if compact {
-		preamble = []string{m.styles.Muted.Render(rule), m.styles.Text.Bold(true).Render(ansi.Truncate(promptText, max(8, inner-lipgloss.Width(badge)-3), "…"))}
-		preamble[1] = badge + m.styles.Muted.Render(" · ") + preamble[1]
-		trailer = []string{m.styles.Text.Render("Choose:"), choices, footer}
-	}
-	availableBody := max(1, height-lipgloss.Height(strings.Join(preamble, "\n"))-lipgloss.Height(strings.Join(trailer, "\n")))
 
-	var body string
+	titleText := " Permission required "
+	promptText := FormatPrompt(m.tool, m.arguments)
+	actionHeader := m.styles.Text.Bold(true).Render(promptText)
+
+	choices := m.choiceView()
+	footer := m.styles.Muted.Render("↑↓ select · 1-4 quick pick · enter confirm · esc deny")
+	if m.deciding {
+		footer = m.styles.Accent.Render("Submitting decision...")
+	}
+
+	fixed := 3 + lipgloss.Height(actionHeader) + lipgloss.Height(choices) + lipgloss.Height(footer)
+	availableBody := max(1, maxHeight-fixed)
+
+	var argBody string
 	if m.editing {
-		m.input.SetWidth(inner)
+		m.input.SetWidth(innerWidth)
 		m.input.SetHeight(max(2, min(6, availableBody-1)))
-		body = m.styles.Muted.Render("Edit JSON arguments (Enter to confirm, Esc to cancel):") + "\n" + m.input.View()
+		argBody = m.styles.Muted.Render("Edit JSON arguments (Enter to confirm, Esc to cancel):") + "\n" + m.input.View()
 	} else {
 		content := FormatArguments(m.tool, m.arguments)
 		if content == "" {
 			content = m.tool
 		}
-		m.body.SetWidth(inner)
+		var styledLines []string
+		for _, l := range strings.Split(content, "\n") {
+			for _, row := range strings.Split(ansi.Hardwrap(l, innerWidth, true), "\n") {
+				if strings.HasPrefix(row, "$ ") {
+					styledLines = append(styledLines, m.styles.Accent.Render(row))
+				} else {
+					styledLines = append(styledLines, m.styles.Muted.Render(row))
+				}
+			}
+		}
+		content = strings.Join(styledLines, "\n")
+		m.body.SetWidth(innerWidth)
+		m.body.SetHeight(min(availableBody, max(1, lipgloss.Height(content))))
 		m.body.SetContent(content)
-		m.body.SetHeight(min(max(1, m.body.TotalLineCount()), availableBody))
-		body = m.body.View()
-	}
-	if m.err != "" {
-		body += "\n" + m.styles.Error.Render("× "+m.err)
+		argBody = m.body.View()
 	}
 
-	lines := append(append([]string{}, preamble...), body)
-	if m.deciding {
-		lines = append(lines, "", m.styles.Muted.Render("Submitting decision..."))
-	} else if !m.editing {
-		lines = append(lines, trailer...)
+	bodyLines := []string{
+		actionHeader,
+		argBody,
+		choices,
+		footer,
 	}
-	return strings.Join(lines, "\n")
+	if m.err != "" {
+		bodyLines = append(bodyLines, m.styles.Error.Render("× "+m.err))
+	}
+
+	topDashes := max(0, cardWidth-2-ansi.StringWidth(titleText)-1)
+	topLine := border.TopLeft + border.Top + m.styles.ApprovalDanger.Render(titleText) + strings.Repeat(border.Top, topDashes) + border.TopRight
+	bottomLine := border.BottomLeft + strings.Repeat(border.Bottom, max(0, cardWidth-2)) + border.BottomRight
+
+	var card strings.Builder
+	card.WriteString(m.styles.Warning.Render(topLine))
+	card.WriteString("\n")
+	for _, bl := range bodyLines {
+		for _, row := range strings.Split(bl, "\n") {
+			rowWidth := ansi.StringWidth(row)
+			pad := max(0, cardWidth-2-2-rowWidth)
+			card.WriteString(m.styles.Warning.Render(border.Left) + "  " + row + strings.Repeat(" ", pad) + m.styles.Warning.Render(border.Right) + "\n")
+		}
+	}
+	card.WriteString(m.styles.Warning.Render(bottomLine))
+
+	return card.String()
 }
 
 func (m *ApprovalModel) choiceView() string {
 	labels := []string{
-		"Yes, allow once",
-		"Yes, switch this session to auto mode",
-		"Edit command or arguments",
-		"No",
+		"Allow once",
+		"Allow for this session",
+		"Edit command",
+		"Deny",
+	}
+	if !strings.Contains(m.tool, "command") && !strings.Contains(m.tool, "shell") {
+		labels[2] = "Edit arguments"
 	}
 	lines := make([]string, 0, len(labels))
 	for index, label := range labels {
-		prefix, style := "  ", m.styles.Muted
+		bullet := "○ "
+		style := m.styles.Text
 		if index == m.choice {
-			prefix, style = "> ", m.styles.Accent
+			bullet = "● "
+			style = m.styles.Accent
 		}
-		line := fmt.Sprintf("%s%d. %s", prefix, index+1, label)
+		line := fmt.Sprintf(" %d %s%s", index+1, bullet, label)
 		lines = append(lines, zone.Mark(fmt.Sprintf("approval-choice-%d", index), style.Render(line)))
 	}
 	return strings.Join(lines, "\n")

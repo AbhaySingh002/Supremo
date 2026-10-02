@@ -85,7 +85,7 @@ func TestPromptComposerClearsOnlyAfterAcceptance(t *testing.T) {
 	model.appendEntry(entryUser, "keep this request")
 	updated, _ = model.Update(promptAcceptedMsg{id: 2, display: "keep this request", receipt: api.Receipt{Accepted: true, RunID: "run-2"}})
 	model = updated.(Model)
-	if model.input.Value() != "" || len(model.entries) == 0 || model.entries[len(model.entries)-2].kind != entryUser {
+	if model.input.Value() != "" || len(model.entries) == 0 || model.entries[len(model.entries)-1].kind != entryUser {
 		t.Fatalf("accepted submit did not clear and project composer: value=%q entries=%#v", model.input.Value(), model.entries)
 	}
 }
@@ -183,7 +183,7 @@ func TestParallelToolActivityKeepsCallOrder(t *testing.T) {
 
 func TestTranscriptArtifactsRemainAvailableOnDemand(t *testing.T) {
 	model := New(nil, ".", "chat", Options{})
-	model.entries = transcriptFromMessages([]api.Message{{Role: "tool", Parts: []api.MessagePart{{Kind: "tool_result", Text: "full output", ArtifactID: "artifact-1", Metadata: json.RawMessage(`{"tool_name":"read_file","tool_call_id":"call-1"}`)}}}})
+	model.entries = model.transcriptFromMessages([]api.Message{{Role: "tool", Parts: []api.MessagePart{{Kind: "tool_result", Text: "full output", ArtifactID: "artifact-1", Metadata: json.RawMessage(`{"tool_name":"read_file","tool_call_id":"call-1"}`)}}}})
 	if len(model.entries) != 1 || model.entries[0].artifactID != "artifact-1" || model.latestArtifactID() != "artifact-1" {
 		t.Fatalf("artifact projection = %#v", model.entries)
 	}
@@ -198,7 +198,7 @@ func TestRestoredToolCallsKeepAssistantBatchIdentity(t *testing.T) {
 		{Role: "tool", Parts: []api.MessagePart{{Kind: "tool_result", Text: `{"path":"main.go","content":"package main"}`, Metadata: json.RawMessage(`{"tool_name":"read_file","tool_call_id":"call-1"}`)}}},
 		{Role: "tool", Parts: []api.MessagePart{{Kind: "tool_result", Text: `{"matches":[]}`, Metadata: json.RawMessage(`{"tool_name":"search_text","tool_call_id":"call-2"}`)}}},
 	}
-	entries := transcriptFromMessages(messages)
+	entries := New(nil, ".", "chat", Options{}).transcriptFromMessages(messages)
 	if len(entries) != 2 || entries[0].toolBatchID != "assistant-1" || entries[1].toolBatchID != "assistant-1" || entries[0].toolCallID != "call-1" || entries[1].toolCallID != "call-2" {
 		t.Fatalf("restored tool identity = %#v", entries)
 	}

@@ -38,17 +38,6 @@ func NewRealContextBuilder(registry *tools.Registry, compiler *contextcompiler.C
 	return &RealContextBuilder{project: loadProjectInstructions(workspace), registry: registry, contextLimit: contextLimit, compiler: compiler}, nil
 }
 
-func (cb *RealContextBuilder) Compile(ctx context.Context, request ContextRequest) (*models.Prompt, error) {
-	prepared, err := cb.Prepare(ctx, request)
-	if err != nil {
-		return nil, err
-	}
-	if err := prepared.Commit(ctx); err != nil {
-		return nil, err
-	}
-	return prepared.Prompt, nil
-}
-
 func (cb *RealContextBuilder) Prepare(ctx context.Context, request ContextRequest) (*PreparedContext, error) {
 	if request.Session == nil {
 		return nil, fmt.Errorf("context session is required")

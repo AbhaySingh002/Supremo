@@ -80,7 +80,7 @@ func (a *Agent) AnswerSideQuestion(ctx context.Context, sessionID, question stri
 	if err := a.repairAndFold(ctx, session); err != nil {
 		return "", err
 	}
-	out := a.submitTurn(ctx, newTurnRequest(session, models.Message{Role: models.RoleUser, Content: question}, turnConfig{
+	out := a.enqueueAndDrive(ctx, newTurnRequest(session, models.Message{Role: models.RoleUser, Content: question}, turnConfig{
 		stream: false, sideAnswer: true,
 		makeRequest: func() ContextRequest {
 			return ContextRequest{Session: session, Profile: protocol.SideAnswer, Mode: tools.ToolModeSide}
@@ -174,10 +174,6 @@ func (a *Agent) logExactModelRequest(session *Session, prompt *models.Prompt, st
 	LogTurnRequest(TurnRequestLogParams{Session: session, Prompt: prompt, Provider: provider, Model: model, Stream: stream, Timestamp: time.Now().UTC()})
 }
 
-func logExactModelResponse(completion *providers.Completion, parsed *parser.Response) {
-	LogTurnResponse(completion, parsed)
-}
-
 func (a *Agent) completeWithRetry(
 	ctx context.Context,
 	session *Session,
@@ -260,16 +256,16 @@ func (a *Agent) completeWithRetry(
 			logging.Info("Model requested tool call: %s (id=%s) args=%s", tc.Name, tc.ID, string(tc.Arguments))
 		}
 		if validate == nil {
-			logExactModelResponse(completion, nil)
+			LogTurnResponse(completion, nil)
 			return completion, nil
 		}
 		if err := validate(completion); err != nil {
 			logging.Warn("Model response rejected by step policy: %v", err)
-			logExactModelResponse(completion, nil)
+			LogTurnResponse(completion, nil)
 			return nil, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
 		}
 		parsed := &parser.Response{ToolCalls: completion.ToolCalls, TurnProgress: parser.ExtractAssistantTurnProgress(completion.Text)}
-		logExactModelResponse(completion, parsed)
+		LogTurnResponse(completion, parsed)
 		return completion, nil
 	}
 }

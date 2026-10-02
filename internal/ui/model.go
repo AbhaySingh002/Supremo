@@ -44,6 +44,7 @@ const (
 	entryDiff
 	entryAssistant
 	entryStreaming
+	entryThought
 	entryError
 	entryDebug
 	entryTodos
@@ -65,6 +66,10 @@ type transcriptEntry struct {
 	toolCallID    string
 	toolBatchID   string
 	artifactID    string
+	startTime     time.Time
+	duration      time.Duration
+	linesCount    int
+	matchCount    int
 }
 
 type taskKind int
@@ -182,7 +187,11 @@ type chatModel struct {
 	feed                 viewport.Model
 	entries              []transcriptEntry
 	streamingEntry       int
+	intentEntry          int
+	lastCompletedIntent  *transcriptEntry
 	pendingInput         string
+	queuedInput          string
+	activityText         string
 	palette              selectors.CommandMenu
 	mentionMenu          list.Model
 	paletteOpen          bool
@@ -236,6 +245,14 @@ type surfaceState struct {
 	priorFocus         focusTarget
 	planQuestion       *plan.PlanQuestionModel
 	pendingInteraction string
+	queuedApprovals    []queuedApproval
+}
+
+// queuedApproval holds a tool authorization that arrived while another one is
+// still on screen; it is promoted once the visible approval is resolved.
+type queuedApproval struct {
+	id    string
+	model *approval.ApprovalModel
 }
 
 // Model is Supremo's root Bubble Tea model.
@@ -579,6 +596,7 @@ func New(client api.Client, workspace, sessionID string, options Options) Model 
 			palette:              palette,
 			mentionMenu:          mentionMenu,
 			streamingEntry:       -1,
+			intentEntry:          -1,
 			liveEntry:            -1,
 			followTail:           true,
 			collapsedToolBatches: make(map[string]bool),
@@ -646,6 +664,12 @@ func (m Model) maxComposerRows() int {
 	return maxRows
 }
 
+// approvalMaxHeight caps the docked approval card so the transcript above
+// it keeps at least half of the body height.
+func (m Model) approvalMaxHeight() int {
+	return min(16, max(9, m.height/2))
+}
+
 func (m *Model) layout() {
 	m.width = max(1, m.width)
 	m.height = max(1, m.height)
@@ -670,7 +694,7 @@ func (m *Model) layout() {
 	}
 	headerHeight, footerHeight := lipgloss.Height(m.HeaderView()), lipgloss.Height(m.FooterView())
 	inputHeight := 0
-	if m.surface == surfaceNone {
+	if m.surface == surfaceNone || (m.surface == surfaceApproval && m.approval != nil) {
 		inputHeight = lipgloss.Height(m.inputView())
 	}
 	bodyHeight := max(1, m.height-headerHeight-footerHeight-paletteHeight-mentionHeight-inputHeight)
@@ -884,23 +908,62 @@ func (m *Model) appendEntry(kind entryKind, content string) {
 	m.rebuildFeed()
 }
 
+func (m *Model) findActiveIntentEntry() int {
+	if m.intentEntry >= 0 && m.intentEntry < len(m.entries) && m.entries[m.intentEntry].kind == entryStatus {
+		return m.intentEntry
+	}
+	for i := len(m.entries) - 1; i >= 0; i-- {
+		if m.entries[i].kind == entryUser {
+			if i+1 < len(m.entries) && m.entries[i+1].kind == entryStatus {
+				m.intentEntry = i + 1
+				return i + 1
+			}
+			break
+		}
+	}
+	return -1
+}
+
+// setStatus updates the transient activity row during a run: one row,
+// setStatus routes transient activity text to the live zone above the
+// composer while a run is active; when idle it updates the trailing status
+// line of the transcript.
 func (m *Model) setStatus(content string) {
 	content = safeText(content)
+	m.activityText = content
+	if m.active != nil {
+		idx := m.findActiveIntentEntry()
+		if idx >= 0 {
+			m.entries[idx].content = content
+			m.entries[idx].dirty = true
+			m.liveEntry = idx
+			m.noteOutput()
+			m.rebuildFeed()
+		}
+		return
+	}
 	if len(m.entries) > 0 && m.entries[len(m.entries)-1].kind == entryStatus {
 		m.entries[len(m.entries)-1].content = content
 		m.entries[len(m.entries)-1].dirty = true
 		m.noteOutput()
-		m.liveEntry = -1
-		if m.active != nil {
-			m.liveEntry = len(m.entries) - 1
-		}
 		m.rebuildFeed()
 		return
 	}
 	m.appendEntry(entryStatus, content)
-	if m.active != nil {
-		m.liveEntry = len(m.entries) - 1
-	}
+}
+
+// liveZoneView renders the transient activity area docked above the composer:
+// the currently running tool rows plus the single live status line. It is
+// derived from model state on every frame, so spinner frames and elapsed
+// times animate without ever mutating the transcript viewport.
+func (m Model) liveZoneView() string {
+	return ""
+}
+
+// refreshLiveZoneLayout re-measures the layout after the live zone's row
+// count changes so the feed and composer keep their positions.
+func (m *Model) refreshLiveZoneLayout() {
+	m.layout()
 }
 
 func (m *Model) setTodos(items []api.TodoItem) {
@@ -936,10 +999,16 @@ func (m *Model) clearLiveStatus() {
 		m.liveEntry = -1
 		return
 	}
+	if m.liveEntry == m.intentEntry || (m.active != nil && m.liveEntry == m.findActiveIntentEntry()) {
+		return
+	}
 	index := m.liveEntry
 	m.entries = append(m.entries[:index], m.entries[index+1:]...)
 	if m.streamingEntry > index {
 		m.streamingEntry--
+	}
+	if m.intentEntry > index {
+		m.intentEntry--
 	}
 	m.liveEntry = -1
 	m.historyPrefix = ""
@@ -999,6 +1068,14 @@ func (m *Model) feedWidth() int {
 }
 
 func (m *Model) historyPrefixValid(n, width int) bool {
+	if m.active != nil && m.intentEntry >= 0 && m.intentEntry < n-1 {
+		return false
+	}
+	for i := 0; i < n-1; i++ {
+		if m.entries[i].dirty || (m.entries[i].kind == entryTool && strings.EqualFold(m.entries[i].toolStatus, "running")) {
+			return false
+		}
+	}
 	return n > 1 &&
 		m.historyPrefix != "" &&
 		m.historyPrefixCount == n-1 &&
@@ -1010,7 +1087,15 @@ func (m *Model) applyLivePrefix(n, width int) {
 	var out strings.Builder
 	out.Grow(len(m.historyPrefix) + 512)
 	out.WriteString(m.historyPrefix)
-	out.WriteString("\n\n")
+	separator := "\n\n"
+	if n > 1 {
+		prev := m.entries[n-2]
+		curr := m.entries[n-1]
+		if prev.kind == entryTool && curr.kind == entryTool && !prev.expanded && !curr.expanded {
+			separator = "\n"
+		}
+	}
+	out.WriteString(separator)
 	last := m.renderEntry(n-1, m.entries[n-1])
 	m.entries[n-1].renderedCache = last
 	m.entries[n-1].renderedWidth = width
@@ -1020,16 +1105,6 @@ func (m *Model) applyLivePrefix(n, width int) {
 	if pinned {
 		m.feed.GotoBottom()
 	}
-}
-
-func (m *Model) refreshLiveFeed() {
-	n := len(m.entries)
-	width := m.feedWidth()
-	if m.historyPrefixValid(n, width) {
-		m.applyLivePrefix(n, width)
-		return
-	}
-	m.rebuildFeed()
 }
 
 func (m *Model) rebuildFeed() {
@@ -1050,11 +1125,15 @@ func (m *Model) rebuildFeed() {
 	type feedBlock struct {
 		text       string
 		start, end int
+		isTool     bool
 	}
 	blocks := make([]feedBlock, 0, n)
 	batchIndices := make(map[string][]int)
 	for index, entry := range m.entries {
-		if entry.kind == entryTool && entry.toolBatchID != "" {
+		if entry.kind != entryTool {
+			continue
+		}
+		if entry.toolBatchID != "" {
 			batchIndices[entry.toolBatchID] = append(batchIndices[entry.toolBatchID], index)
 		}
 	}
@@ -1070,7 +1149,7 @@ func (m *Model) rebuildFeed() {
 				if indices[0] != index {
 					continue
 				}
-				blocks = append(blocks, feedBlock{text: m.renderToolBatch(indices), start: index, end: indices[len(indices)-1]})
+				blocks = append(blocks, feedBlock{text: m.renderToolBatch(indices), start: index, end: indices[len(indices)-1], isTool: true})
 				continue
 			}
 		}
@@ -1078,14 +1157,27 @@ func (m *Model) rebuildFeed() {
 		m.entries[index].renderedCache = rendered
 		m.entries[index].renderedWidth = width
 		m.entries[index].dirty = false
-		blocks = append(blocks, feedBlock{text: rendered, start: index, end: index})
+		blocks = append(blocks, feedBlock{text: rendered, start: index, end: index, isTool: entry.kind == entryTool})
 	}
+
+	var sb strings.Builder
+	for i, block := range blocks {
+		if i > 0 {
+			prev := blocks[i-1]
+			if prev.isTool && block.isTool && !m.entries[prev.start].expanded && !m.entries[block.start].expanded {
+				sb.WriteString("\n")
+			} else {
+				sb.WriteString("\n\n")
+			}
+		}
+		sb.WriteString(block.text)
+	}
+	content := strings.TrimSpace(sb.String())
 
 	parts := make([]string, 0, len(blocks))
 	for _, block := range blocks {
 		parts = append(parts, block.text)
 	}
-	content := strings.TrimSpace(strings.Join(parts, "\n\n"))
 	if len(blocks) > 1 && blocks[len(blocks)-1].start == n-1 {
 		m.historyPrefix = strings.Join(parts[:len(parts)-1], "\n\n")
 		m.historyPrefixCount = n - 1
@@ -1163,7 +1255,7 @@ func (m Model) glyph(symbol, fallback string) string {
 }
 
 func (m *Model) renderEntry(index int, entry transcriptEntry) string {
-	live := m.active != nil && index == m.liveEntry
+	live := m.active != nil && (index == m.liveEntry || index == m.intentEntry)
 	width := m.contentWidth()
 	if width <= 0 {
 		width = 80
@@ -1175,6 +1267,7 @@ func (m *Model) renderEntry(index int, entry transcriptEntry) string {
 	switch entry.kind {
 	case entryUser:
 		cleanPrompt, attachedFiles := composer.CleanUserPrompt(entry.content)
+		label := m.styles.UserLabel.Render("You")
 		body := m.renderMentionText(cleanPrompt)
 		if len(attachedFiles) > 0 {
 			var pills []string
@@ -1183,22 +1276,35 @@ func (m *Model) renderEntry(index int, entry transcriptEntry) string {
 			}
 			body += "\n" + strings.Join(pills, " ")
 		}
-		return m.styles.UserGutter.Width(gutterWidth).Render(body)
+		return label + "\n" + m.styles.Text.Width(gutterWidth).Render(body)
 	case entryCommand:
-		line := m.styles.User.Render("$ ") + m.styles.Text.Render(entry.content)
-		return m.styles.UserGutter.Width(gutterWidth).Render(line)
+		return m.styles.UserLabel.Render("You") + "\n" +
+			m.styles.Muted.Render("$ "+entry.content)
 	case entryStatus:
-		marker := m.glyph("·", "-")
 		if live {
-			marker = m.spinner.View()
+			marker := m.spinner.View()
+			return m.styles.Muted.Width(width).Render("  " + marker + " " + truncate(entry.content, max(20, width-6)))
 		}
-		return m.styles.Muted.Width(width).Render(marker + " " + entry.content)
+		if entry.toolStatus == "completed" {
+			marker := m.styles.Success.Render(m.glyph("✓", "OK"))
+			return m.styles.Muted.Width(width).Render("  " + marker + " " + truncate(entry.content, max(20, width-6)))
+		}
+		if entry.toolStatus == "failed" {
+			marker := m.styles.ToolFailure.Render(m.glyph("✗", "X"))
+			return m.styles.Muted.Width(width).Render("  " + marker + " " + truncate(entry.content, max(20, width-6)))
+		}
+		if entry.toolStatus == "cancelled" {
+			marker := m.styles.Warning.Render(m.glyph("×", "X"))
+			return m.styles.Muted.Width(width).Render("  " + marker + " " + truncate(entry.content, max(20, width-6)))
+		}
+		marker := m.glyph("·", "-")
+		return m.styles.Muted.Width(width).Render("  " + marker + " " + truncate(entry.content, max(20, width-6)))
 	case entryTool:
 		return m.RenderToolEntry(index, entry, live)
 	case entryDiff:
 		return m.RenderDiffEntry(index, entry)
 	case entryAssistant:
-		label := m.styles.Assistant.Render(m.glyph("◆", "*") + " Supremo")
+		label := m.styles.AssistantLabel.Render("Supremo")
 		var body string
 		if entry.rendered != "" {
 			body = entry.rendered
@@ -1213,10 +1319,27 @@ func (m *Model) renderEntry(index int, entry transcriptEntry) string {
 				body = m.styles.Text.Width(gutterWidth).Render(entry.content)
 			}
 		}
-		return m.styles.AssistantGutter.Width(gutterWidth).Render(label + "\n" + body)
+		return label + "\n" + m.styles.Text.Width(gutterWidth).PaddingLeft(0).Render(body)
 	case entryStreaming:
-		label := m.styles.Assistant.Render(m.glyph("◆", "*") + " Supremo")
-		return m.styles.AssistantGutter.Width(gutterWidth).Render(label + "\n" + m.styles.Text.Width(gutterWidth).Render(entry.content))
+		label := m.styles.AssistantLabel.Render("Supremo")
+		return label + "\n" + m.styles.Text.Width(gutterWidth).Render(entry.content)
+	case entryThought:
+		marker := m.glyph("·", "-")
+		if live {
+			marker = m.spinner.View()
+		}
+		if entry.expanded {
+			header := m.styles.Muted.Render(marker + " Thinking:")
+			body := m.styles.Muted.PaddingLeft(2).Render(entry.content)
+			return header + "\n" + body
+		}
+		summary := "Thought for "
+		if entry.duration > 0 {
+			summary += fmt.Sprintf("%.1fs", entry.duration.Seconds())
+		} else {
+			summary += "a moment"
+		}
+		return m.styles.Muted.Render(fmt.Sprintf("%s %s (ctrl+j to expand)", marker, summary))
 	case entryError:
 		return m.formatUserError(entry.content, width)
 	case entryDebug:
@@ -1278,6 +1401,70 @@ func (m *Model) flushStreaming() {
 	m.updateStreaming(chunk)
 }
 
+func (m *Model) collapseActiveThought() {
+	for i := len(m.entries) - 1; i >= 0; i-- {
+		if m.entries[i].kind == entryThought && m.entries[i].expanded {
+			m.entries[i].expanded = false
+			if !m.entries[i].startTime.IsZero() {
+				m.entries[i].duration = time.Since(m.entries[i].startTime)
+			}
+			m.entries[i].dirty = true
+			break
+		}
+	}
+}
+
+func (m *Model) appendThoughtChunk(content string) {
+	content = safeText(content)
+	for i := len(m.entries) - 1; i >= 0; i-- {
+		if m.entries[i].kind == entryThought && m.entries[i].expanded {
+			m.entries[i].content += content
+			m.entries[i].dirty = true
+			m.noteOutput()
+			m.rebuildFeed()
+			return
+		}
+	}
+	m.entries = append(m.entries, transcriptEntry{
+		kind:      entryThought,
+		content:   content,
+		startTime: time.Now(),
+		expanded:  true,
+		dirty:     true,
+	})
+	m.noteOutput()
+	m.rebuildFeed()
+}
+
+// foldStreamingIntoActivity collapses narration streamed ahead of a tool call
+// into the live activity row so it never persists as a transcript line.
+func (m *Model) foldStreamingIntoActivity() bool {
+	if m.streamingEntry < 0 || m.streamingEntry >= len(m.entries) {
+		return false
+	}
+	text := strings.TrimSpace(m.entries[m.streamingEntry].content)
+	m.entries = append(m.entries[:m.streamingEntry], m.entries[m.streamingEntry+1:]...)
+	if m.intentEntry > m.streamingEntry {
+		m.intentEntry--
+	}
+	if m.liveEntry > m.streamingEntry {
+		m.liveEntry--
+	}
+	m.streamingEntry = -1
+	if line := firstLine(text); line != "" {
+		m.setStatus(line)
+		return true
+	}
+	return false
+}
+
+func firstLine(text string) string {
+	if i := strings.IndexByte(text, '\n'); i >= 0 {
+		return strings.TrimSpace(text[:i])
+	}
+	return strings.TrimSpace(text)
+}
+
 func (m *Model) updateStreaming(content string) {
 	content = safeText(content)
 	if m.streamingEntry >= 0 && m.streamingEntry < len(m.entries) {
@@ -1287,6 +1474,7 @@ func (m *Model) updateStreaming(content string) {
 		m.rebuildFeed()
 		return
 	}
+	m.collapseActiveThought()
 	m.entries = append(m.entries, transcriptEntry{kind: entryStreaming, content: content, dirty: true})
 	m.streamingEntry = len(m.entries) - 1
 	m.noteOutput()
@@ -1326,11 +1514,23 @@ func (m *Model) startTask(input string) tea.Cmd {
 	m.paletteOpen = false
 	m.pendingInput = input
 	m.input.Blur()
+	m.lastCompletedIntent = nil
+	cleaned := make([]transcriptEntry, 0, len(m.entries))
+	for _, entry := range m.entries {
+		if entry.kind == entryStatus && entry.toolStatus == "completed" {
+			continue
+		}
+		cleaned = append(cleaned, entry)
+	}
+	m.entries = cleaned
 	m.appendEntry(entryUser, input)
 	for _, warning := range warnings {
 		m.appendEntry(entryStatus, "@ "+warning)
 	}
-	m.setStatus("Submitting request")
+	m.appendEntry(entryStatus, "Working...")
+	m.intentEntry = len(m.entries) - 1
+	m.liveEntry = m.intentEntry
+	m.activityText = "Working..."
 	return tea.Batch(submitPromptCmd(ctx, m.client, m.session.ID, prompt, input, id), m.waitForProvider())
 }
 
@@ -1355,7 +1555,7 @@ func (m *Model) startShell(command string) tea.Cmd {
 	m.active = &activeTask{id: id, ctx: ctx, cancel: cancel, kind: taskShell}
 	m.paletteOpen = false
 	m.resetComposer()
-	m.entries = append(m.entries, newLocalShellEntry(command))
+	m.entries = append(m.entries, m.newLocalShellEntry(command))
 	m.liveEntry = len(m.entries) - 1
 	m.noteOutput()
 	m.rebuildFeed()
@@ -1501,12 +1701,19 @@ func (m Model) toolPath(path string) string {
 	if path == "" || path == "." {
 		return ""
 	}
-	if filepath.IsAbs(path) && m.workspace != "" {
-		if relative, err := filepath.Rel(m.workspace, path); err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-			path = relative
+	return prettyPath(path, m.workspace)
+}
+
+// prettyPath renders a path relative to the workspace when it is inside the
+// workspace, collapsing the home directory to ~ otherwise.
+func prettyPath(p, workspace string) string {
+	p = filepath.Clean(strings.TrimSpace(p))
+	if filepath.IsAbs(p) && workspace != "" {
+		if relative, err := filepath.Rel(workspace, p); err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return filepath.ToSlash(relative)
 		}
 	}
-	return filepath.ToSlash(filepath.Clean(path))
+	return filepath.ToSlash(shortenPath(p))
 }
 
 func conciseCommandLabel(command string, args []string, status string) string {

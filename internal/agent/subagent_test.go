@@ -17,8 +17,8 @@ import (
 
 type subagentLifecycle struct{}
 
-func (subagentLifecycle) Compile(_ context.Context, request ContextRequest) (*models.Prompt, error) {
-	return &models.Prompt{System: request.Objective}, nil
+func (subagentLifecycle) Prepare(_ context.Context, request ContextRequest) (*PreparedContext, error) {
+	return &PreparedContext{Prompt: &models.Prompt{System: request.Objective}}, nil
 }
 func (subagentLifecycle) RecordObjective(context.Context, string, string, string) error { return nil }
 func (subagentLifecycle) RecordUsage(context.Context, *models.Prompt, providers.Usage) error {
@@ -219,7 +219,7 @@ func TestSubagentRecoveryRunsQueuedMessagesFIFOAndRepairsStartedWork(t *testing.
 	}
 	descriptor := sessionlog.SubagentDescriptorPayload{Version: 1, ParentSessionID: parent.ID, Label: child.Name, Depth: 1, Scope: string(SubagentScopeLocalRead)}
 	first := sessionlog.SubagentQueuedPayload{MessageID: "message-1", SenderSessionID: parent.ID, Content: "first"}
-	if err := manager.createChild(context.Background(), child, descriptor, first); err != nil {
+	if err := manager.createChildIdempotent(context.Background(), child, descriptor, first, ""); err != nil {
 		t.Fatal(err)
 	}
 	secondRecord, _ := sessionlog.New(sessionlog.EventSubagentQueued, sessionlog.SubagentQueuedPayload{MessageID: "message-2", SenderSessionID: parent.ID, Content: "second"})
@@ -248,7 +248,7 @@ func TestSubagentRecoveryRunsQueuedMessagesFIFOAndRepairsStartedWork(t *testing.
 		ParentSessionID: parent.ID, Origin: "subagent", DelegationLabel: "interrupted-child", DelegationDepth: 1, DelegationScope: SubagentScopeExecution,
 	}
 	queued := sessionlog.SubagentQueuedPayload{MessageID: "interrupted-message", SenderSessionID: parent.ID, Content: "do not replay"}
-	if err := manager.createChild(context.Background(), interrupted, descriptor, queued); err != nil {
+	if err := manager.createChildIdempotent(context.Background(), interrupted, descriptor, queued, ""); err != nil {
 		t.Fatal(err)
 	}
 	start, _ := sessionlog.New(sessionlog.EventSubagentRunStart, sessionlog.SubagentRunStartPayload{RunID: "interrupted-run", MessageID: queued.MessageID})
@@ -275,7 +275,7 @@ func TestSubagentRecoveryRunsQueuedMessagesFIFOAndRepairsStartedWork(t *testing.
 		ParentSessionID: parent.ID, Origin: "subagent", DelegationLabel: "completed-child", DelegationDepth: 1, DelegationScope: SubagentScopeLocalRead,
 	}
 	completedQueue := sessionlog.SubagentQueuedPayload{MessageID: "completed-message", SenderSessionID: parent.ID, Content: "completed before restart"}
-	if err := manager.createChild(context.Background(), completed, descriptor, completedQueue); err != nil {
+	if err := manager.createChildIdempotent(context.Background(), completed, descriptor, completedQueue, ""); err != nil {
 		t.Fatal(err)
 	}
 	completedStart, _ := sessionlog.New(sessionlog.EventSubagentRunStart, sessionlog.SubagentRunStartPayload{RunID: "completed-run", MessageID: completedQueue.MessageID})

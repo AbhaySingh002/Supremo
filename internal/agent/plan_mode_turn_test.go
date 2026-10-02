@@ -40,7 +40,7 @@ func TestPlanModeContextBuilderInjectsPolicy(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. When Plan Mode is inactive, PlanModePolicy is not injected
-	prompt, err := builder.Compile(ctx, agent.ContextRequest{
+	prepared1, err := builder.Prepare(ctx, agent.ContextRequest{
 		Session:   session,
 		Objective: "Build feature",
 		Mode:      tools.ToolModeNormal,
@@ -49,6 +49,7 @@ func TestPlanModeContextBuilderInjectsPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	prompt := prepared1.Prompt
 	if strings.Contains(prompt.System, "You are in Plan Mode.") {
 		t.Fatal("expected PlanModePolicy to be absent when Plan Mode is inactive")
 	}
@@ -62,7 +63,7 @@ func TestPlanModeContextBuilderInjectsPolicy(t *testing.T) {
 	}
 
 	// 3. When Plan Mode is active, PlanModePolicy is injected into system prompt
-	promptActive, err := builder.Compile(ctx, agent.ContextRequest{
+	prepared2, err := builder.Prepare(ctx, agent.ContextRequest{
 		Session:   session,
 		Objective: "Build feature",
 		Mode:      tools.ToolModeNormal,
@@ -71,6 +72,7 @@ func TestPlanModeContextBuilderInjectsPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	promptActive := prepared2.Prompt
 	if !strings.Contains(promptActive.System, "You are in Plan Mode.") {
 		t.Fatal("expected PlanModePolicy in system prompt when Plan Mode is active")
 	}
@@ -89,7 +91,7 @@ func TestPlanModeContextBuilderInjectsPolicy(t *testing.T) {
 		t.Fatal("expected session.PlanModeActive() to be false after disabling")
 	}
 
-	promptInactive, err := builder.Compile(ctx, agent.ContextRequest{
+	prepared3, err := builder.Prepare(ctx, agent.ContextRequest{
 		Session:   session,
 		Objective: "Build feature",
 		Mode:      tools.ToolModeNormal,
@@ -98,6 +100,7 @@ func TestPlanModeContextBuilderInjectsPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	promptInactive := prepared3.Prompt
 	if strings.Contains(promptInactive.System, "You are in Plan Mode.") {
 		t.Fatal("expected PlanModePolicy to be absent after disabling Plan Mode")
 	}

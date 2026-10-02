@@ -3,8 +3,6 @@ package components
 import (
 	"strings"
 
-	"charm.land/lipgloss/v2/tree"
-
 	"github.com/AbhaySingh002/supremo/internal/api"
 	"github.com/AbhaySingh002/supremo/internal/parser/models"
 )
@@ -14,18 +12,18 @@ func Todos(items []api.TodoItem) string {
 	if len(items) == 0 {
 		return ""
 	}
-	root := tree.Root("Todos")
+	var lines []string
 	for _, item := range items {
-		mark := "[ ]"
+		symbol := "○"
 		switch item.Status {
 		case "completed":
-			mark = "[x]"
+			symbol = "✓"
 		case "in_progress":
-			mark = "[~]"
+			symbol = "●"
 		}
-		root.Child(mark + " " + strings.TrimSpace(item.Content))
+		lines = append(lines, "  "+symbol+" "+strings.TrimSpace(item.Content))
 	}
-	return root.String()
+	return strings.Join(lines, "\n")
 }
 
 // ParseTodos extracts todo items from a tool JSON payload.

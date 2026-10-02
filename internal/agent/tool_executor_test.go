@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/AbhaySingh002/supremo/internal/parser/models"
+	"github.com/AbhaySingh002/supremo/internal/sessionlog"
 	"github.com/AbhaySingh002/supremo/internal/state"
 	"github.com/AbhaySingh002/supremo/internal/tools"
 	"github.com/AbhaySingh002/supremo/internal/tools/filesystem"
@@ -201,7 +202,7 @@ func TestToolExecutor_CrashRepairDistinguishesNotStartedFromUnknown(t *testing.T
 		// Crash happened here: no EventToolResult for either call, step & turn left open
 	}
 
-	repaired := repairSessionTail(events)
+	repaired := sessionlog.RepairTail(events)
 	if len(repaired) < 2 {
 		t.Fatalf("expected at least 2 repaired events, got %d", len(repaired))
 	}

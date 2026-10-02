@@ -133,10 +133,6 @@ func (a *Agent) waitIdle() {
 	}
 }
 
-func (a *Agent) submitTurn(ctx context.Context, req *TurnRequest) TurnResult {
-	return a.enqueueAndDrive(ctx, req)
-}
-
 func (a *Agent) runTurn(ctx context.Context, req *TurnRequest) (out TurnResult) {
 	session := req.Session
 	if session == nil && req.Config.makeRequest != nil {
@@ -465,7 +461,7 @@ func (a *Agent) repairAndFold(ctx context.Context, session *Session) error {
 	if session == nil {
 		return nil
 	}
-	extra := repairSessionTail(session.events)
+	extra := sessionlog.RepairTail(session.events)
 	if len(extra) == 0 {
 		return nil
 	}
@@ -516,8 +512,4 @@ func (a *Agent) appendTerminalConfigured(ctx context.Context, session *Session, 
 
 func terminalContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-}
-
-func repairSessionTail(events []SessionEvent) []SessionEvent {
-	return sessionlog.RepairTail(events)
 }

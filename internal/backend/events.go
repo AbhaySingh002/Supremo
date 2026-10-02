@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/AbhaySingh002/supremo/internal/agent"
 	"github.com/AbhaySingh002/supremo/internal/api"
 	"github.com/AbhaySingh002/supremo/internal/sessionlog"
 	"github.com/AbhaySingh002/supremo/internal/state"
@@ -66,9 +67,16 @@ func (s *Service) Subscribe(ctx context.Context, request api.SubscribeRequest) (
 	}
 	out := make(chan api.Event, 256)
 	subscription := &Subscription{events: out, cancel: cancel}
+	var progressSub *agent.ProgressSubscription
+	if s.runtimes != nil {
+		progressSub = s.runtimes.SubscribeProgress(256)
+	}
 	go func() {
 		defer close(out)
 		defer durable.Close()
+		if progressSub != nil {
+			defer progressSub.Close()
+		}
 		send := func(event api.Event) bool {
 			select {
 			case out <- event:
@@ -82,10 +90,36 @@ func (s *Service) Subscribe(ctx context.Context, request api.SubscribeRequest) (
 				return
 			}
 		}
+		var progressEvents <-chan agent.ProgressEvent
+		if progressSub != nil {
+			progressEvents = progressSub.Events
+		}
 		for {
 			select {
 			case <-ctx.Done():
 				return
+			case pe, ok := <-progressEvents:
+				if !ok {
+					progressEvents = nil
+					continue
+				}
+				if pe.SessionID != "" && request.SessionID != "" && pe.SessionID != request.SessionID {
+					continue
+				}
+				if pe.Kind == agent.ProgressThought && pe.Message != "" {
+					data, _ := json.Marshal(api.AssistantChunk{
+						Event: api.StreamEvent{Type: "reasoning_delta", ReasoningDelta: pe.Message},
+					})
+					if !send(api.Event{
+						V:         api.Version,
+						SessionID: request.SessionID,
+						Type:      api.EventAssistantChunk,
+						Durable:   false,
+						Data:      data,
+					}) {
+						return
+					}
+				}
 			case event, ok := <-durable.Events:
 				if !ok {
 					if err := durable.Err(); err != nil {

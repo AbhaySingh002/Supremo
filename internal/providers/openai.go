@@ -267,9 +267,24 @@ func (p *OpenAIProvider) Stream(ctx context.Context, prompt *models.Prompt, rece
 	if p.nvidia {
 		accept = "application/json"
 	}
-	body, _, err := doJSONStream(ctx, p.client, apiURL(p.endpoint, "chat/completions"), p.apiKey, accept, p.chatRequest(prompt, true))
-	if err != nil {
+	if err := streamOpenAICompatible(ctx, p.client, apiURL(p.endpoint, "chat/completions"), p.apiKey, accept, p.chatRequest(prompt, true), receive); err != nil {
 		return fmt.Errorf("openai-compatible streaming execution: %w", err)
+	}
+	return nil
+}
+
+func streamOpenAICompatible(
+	ctx context.Context,
+	client *http.Client,
+	endpoint string,
+	apiKey string,
+	accept string,
+	req openAIChatRequest,
+	receive func(StreamEvent) error,
+) error {
+	body, _, err := doJSONStream(ctx, client, endpoint, apiKey, accept, req)
+	if err != nil {
+		return err
 	}
 	defer body.Close()
 

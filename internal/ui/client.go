@@ -205,7 +205,16 @@ func (m *Model) applySnapshot(snapshot api.SessionSnapshot) {
 	pendingActivity := append([]activityEvent(nil), m.activity...)
 	m.session = snapshot.Session
 	m.cursor = max(m.cursor, snapshot.AsOfCursor)
-	m.entries = transcriptFromMessages(snapshot.Messages)
+
+	var savedIntent *transcriptEntry
+	if activeIdx := m.findActiveIntentEntry(); activeIdx >= 0 {
+		saved := m.entries[activeIdx]
+		savedIntent = &saved
+	} else if m.lastCompletedIntent != nil {
+		savedIntent = m.lastCompletedIntent
+	}
+
+	m.entries = m.transcriptFromMessages(snapshot.Messages)
 	m.collapsedToolBatches = make(map[string]bool)
 	m.todos = todosFromMessages(snapshot.Messages)
 	if len(m.todos) > 0 {
@@ -227,7 +236,8 @@ func (m *Model) applySnapshot(snapshot api.SessionSnapshot) {
 	}
 	m.streamingEntry, m.liveEntry = -1, -1
 	m.followTail, m.newOutput = true, 0
-	m.active = nil
+	priorActive := m.active
+	m.active = priorActive
 	m.approval, m.planQuestion = nil, nil
 	if m.surface == surfaceApproval || m.surface == surfacePlanQuestion {
 		m.surface = surfaceNone
@@ -237,10 +247,42 @@ func (m *Model) applySnapshot(snapshot api.SessionSnapshot) {
 	for index := range snapshot.Runs {
 		run := snapshot.Runs[index]
 		if run.Status == "running" || run.Status == "queued" || run.Status == "cancelling" {
-			ctx, cancel := context.WithCancel(m.ctx)
-			m.nextTaskID++
-			m.active = &activeTask{id: m.nextTaskID, ctx: ctx, cancel: cancel, kind: taskAgent, runID: run.RunID}
+			if priorActive != nil && (priorActive.runID == run.RunID || priorActive.runID == "") {
+				m.active = priorActive
+				m.active.runID = run.RunID
+			} else if m.active == nil {
+				ctx, cancel := context.WithCancel(m.ctx)
+				m.nextTaskID++
+				m.active = &activeTask{id: m.nextTaskID, ctx: ctx, cancel: cancel, kind: taskAgent, runID: run.RunID}
+			}
 			m.phase = run.Status
+		}
+	}
+	if len(snapshot.Runs) > 0 && m.active != nil {
+		last := snapshot.Runs[len(snapshot.Runs)-1]
+		if last.Status == "completed" || last.Status == "failed" || last.Status == "cancelled" || last.Status == "interrupted" {
+			if priorActive != nil && priorActive.runID == last.RunID {
+				m.active = nil
+			}
+		}
+	}
+
+	if savedIntent != nil {
+		lastUser := -1
+		for i := len(m.entries) - 1; i >= 0; i-- {
+			if m.entries[i].kind == entryUser {
+				lastUser = i
+				break
+			}
+		}
+		if lastUser >= 0 {
+			saved := *savedIntent
+			saved.dirty = true
+			m.entries = append(m.entries[:lastUser+1], append([]transcriptEntry{saved}, m.entries[lastUser+1:]...)...)
+			m.intentEntry = lastUser + 1
+			if m.active != nil {
+				m.liveEntry = m.intentEntry
+			}
 		}
 	}
 	if len(snapshot.Runs) > 0 && m.active == nil {
@@ -290,13 +332,31 @@ func (m *Model) applyAPIEvent(event api.Event) tea.Cmd {
 		_ = json.Unmarshal(event.Data, &run)
 		m.flushStreaming()
 		m.clearLiveStatus()
+		intentIdx := m.findActiveIntentEntry()
+		if intentIdx >= 0 {
+			switch run.Status {
+			case "failed":
+				m.entries[intentIdx].toolStatus = "failed"
+			case "cancelled", "interrupted":
+				m.entries[intentIdx].toolStatus = "cancelled"
+			default:
+				m.entries[intentIdx].toolStatus = "completed"
+			}
+			m.entries[intentIdx].dirty = true
+			completed := m.entries[intentIdx]
+			m.lastCompletedIntent = &completed
+		}
+		m.intentEntry = -1
+		m.liveEntry = -1
+		m.activityText = ""
 		m.active = nil
 		m.cancelling = false
 		m.approval = nil
 		if m.surface == surfaceApproval {
 			m.surface = surfaceNone
-			m.layout()
 		}
+		m.layout()
+		m.rebuildFeed()
 		m.pendingInteraction = ""
 		if run.Status == "cancelled" || run.Status == "interrupted" {
 			m.finishStreaming(entryStatus, "")
@@ -305,13 +365,19 @@ func (m *Model) applyAPIEvent(event api.Event) tea.Cmd {
 			m.finishStreaming(entryStatus, "")
 			m.appendEntry(entryError, run.Error)
 		}
-		return refreshSnapshotCmd(m.ctx, m.client, m.session.ID, m.sessionEpoch)
+		cmd := refreshSnapshotCmd(m.ctx, m.client, m.session.ID, m.sessionEpoch)
+		if queued := m.queuedInput; queued != "" {
+			m.queuedInput = ""
+			return tea.Batch(cmd, m.startTask(queued))
+		}
+		return cmd
 	case api.EventAssistantMessage, api.EventToolResult:
 		return refreshSnapshotCmd(m.ctx, m.client, m.session.ID, m.sessionEpoch)
 	case api.EventInteractionRequest:
 		var payload api.InteractionEvent
 		if json.Unmarshal(event.Data, &payload) == nil {
 			m.openInteraction(api.Interaction{ID: payload.InteractionID, SessionID: event.SessionID, RunID: payload.RunID, Kind: payload.Kind, Status: "pending", Data: payload.Data})
+			return m.spinner.Tick
 		}
 	case api.EventInteractionResolve:
 		var payload api.InteractionEvent

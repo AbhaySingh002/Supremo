@@ -40,18 +40,10 @@ func (r *stateRecorder) RecordToolLifecycle(ctx context.Context, lifecycle tools
 			}
 		}
 	}
+	// Only checkpoint events diverge from the default tool.<status> naming.
 	eventType := "tool." + lifecycle.Status
 	if lifecycle.Status == "checkpoint" {
 		eventType = "checkpoint.available"
-	}
-	if lifecycle.Status == "called" {
-		eventType = "tool.called"
-	}
-	if lifecycle.Status == "completed" {
-		eventType = "tool.completed"
-	}
-	if lifecycle.Status == "failed" {
-		eventType = "tool.failed"
 	}
 	input := sessionlog.ApplyEventMeta(state.EventInput{SessionID: r.sessionID, Type: eventType, Payload: payload}, sessionlog.EventMetaFromContext(ctx))
 	event, err := r.store.AppendEvent(ctx, input)

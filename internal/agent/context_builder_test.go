@@ -44,15 +44,19 @@ func TestRealContextBuilderRecordsPromptCompilerMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	builder := &RealContextBuilder{registry: tools.NewRegistry(), compiler: contextcompiler.New(store), contextLimit: func() int { return 32768 }}
-	prompt, err := builder.Compile(context.Background(), ContextRequest{Session: session, Objective: "Plan safely", Mode: tools.ToolModeSide, Profile: protocol.Execution})
+	prepared, err := builder.Prepare(context.Background(), ContextRequest{Session: session, Objective: "Plan safely", Mode: tools.ToolModeSide, Profile: protocol.Execution})
 	if err != nil {
 		t.Fatal(err)
 	}
+	prompt := prepared.Prompt
 	if prompt.Metadata.Profile != string(protocol.Execution) || prompt.Metadata.ProtocolVersion != "" || len(prompt.Metadata.Templates) < 2 || len(prompt.Metadata.Sections) == 0 {
 		t.Fatalf("prompt metadata = %#v", prompt.Metadata)
 	}
 	if strings.Contains(prompt.System, "Response Protocol") || strings.Contains(prompt.System, "final_answer") || strings.Contains(prompt.System, "<tool_call>") {
 		t.Fatalf("assembled prompt still has a response envelope:\n%s", prompt.System)
+	}
+	if err := prepared.Commit(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 	manifest, err := builder.compiler.LatestManifest(context.Background(), session.ID)
 	if err != nil || manifest.Prompt.Profile != string(protocol.Execution) || len(manifest.Prompt.Templates) != len(prompt.Metadata.Templates) {

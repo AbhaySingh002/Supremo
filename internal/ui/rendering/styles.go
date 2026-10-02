@@ -77,6 +77,12 @@ type Styles struct {
 	BadgeExecuting             lipgloss.Style
 	BadgeWarning               lipgloss.Style
 	BadgeError                 lipgloss.Style
+	ComposerRule               lipgloss.Style
+	UserLabel                  lipgloss.Style
+	AssistantLabel             lipgloss.Style
+	ToolVerb                   lipgloss.Style
+	ToolTime                   lipgloss.Style
+	ApprovalBadge              lipgloss.Style
 }
 
 // NewStyles constructs a new Styles struct from the active theme.
@@ -172,5 +178,11 @@ func NewStyles() Styles {
 		BadgeExecuting:             base.Bold(true).Foreground(design.Accent),
 		BadgeWarning:               base.Bold(true).Foreground(design.Warning),
 		BadgeError:                 base.Bold(true).Foreground(design.Error),
+		ComposerRule:               base.Foreground(design.Border),
+		UserLabel:                  base.Bold(true).Foreground(design.User),
+		AssistantLabel:             base.Bold(true).Foreground(design.Assistant),
+		ToolVerb:                   base.Foreground(design.Secondary),
+		ToolTime:                   base.Foreground(design.TextDim),
+		ApprovalBadge:              base.Foreground(design.Secondary),
 	}
 }

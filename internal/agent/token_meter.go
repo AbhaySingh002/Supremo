@@ -60,41 +60,16 @@ func (m Measurement) IsPressured() bool {
 }
 
 // TokenMeter is the canonical token pressure calculator.
-type TokenMeter struct {
-	ThresholdRatio float64
-	RetainRatio    float64
-	FallbackLimit  int
-}
+type TokenMeter struct{}
 
-// NewTokenMeter creates a TokenMeter initialized with default ratios (0.80 threshold, 0.16 retain).
-func NewTokenMeter() *TokenMeter {
-	return &TokenMeter{
-		ThresholdRatio: DefaultThresholdRatio,
-		RetainRatio:    DefaultRetainRatio,
-		FallbackLimit:  DefaultFallbackLimit,
-	}
-}
+// NewTokenMeter creates the canonical TokenMeter (0.80 threshold, 0.16 retain).
+func NewTokenMeter() *TokenMeter { return &TokenMeter{} }
 
 // Measure evaluates the header and surface messages to compute request pressure.
 func (m *TokenMeter) Measure(session *Session, prompt *models.Prompt, contextLimit int) Measurement {
 	limit := contextLimit
 	if limit <= 0 {
-		if m != nil && m.FallbackLimit > 0 {
-			limit = m.FallbackLimit
-		} else {
-			limit = DefaultFallbackLimit
-		}
-	}
-
-	threshRatio := DefaultThresholdRatio
-	retainRatio := DefaultRetainRatio
-	if m != nil {
-		if m.ThresholdRatio > 0 {
-			threshRatio = m.ThresholdRatio
-		}
-		if m.RetainRatio > 0 {
-			retainRatio = m.RetainRatio
-		}
+		limit = DefaultFallbackLimit
 	}
 
 	headerTokens := 0
@@ -148,7 +123,7 @@ func (m *TokenMeter) Measure(session *Session, prompt *models.Prompt, contextLim
 		TotalTokens:     total,
 		Nodes:           nodes,
 		ContextLimit:    limit,
-		ThresholdTokens: int(float64(limit) * threshRatio),
-		RetainTokens:    int(float64(limit) * retainRatio),
+		ThresholdTokens: int(float64(limit) * DefaultThresholdRatio),
+		RetainTokens:    int(float64(limit) * DefaultRetainRatio),
 	}
 }

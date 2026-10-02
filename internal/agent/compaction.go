@@ -212,6 +212,14 @@ func (e *CompactionEngine) Compact(
 	endSeq := candidateSeqs[len(candidateSeqs)-1]
 	targetGeneration := surfaceGeneration(session)
 	providerName, modelName := session.Provider, session.Model
+	basePayload := sessionlog.CompactionPayload{CompactionID: compactionID, Provider: providerName, Model: modelName}
+	// failed records a terminal compaction/end event for every rejection path.
+	failed := func(finishReason string, usage providers.Usage, opErr error) error {
+		payload := basePayload
+		payload.FinishReason, payload.InputTokens, payload.OutputTokens = finishReason, usage.InputTokens, usage.OutputTokens
+		payload.Status, payload.Error = "failed", opErr.Error()
+		return finishCompaction(ctx, store, session, payload, opErr)
+	}
 
 	// 1. Append compaction/start.
 	if err := appendCompactionEvent(ctx, store, session, EventCompactionStart, sessionlog.CompactionPayload{
@@ -253,13 +261,13 @@ func (e *CompactionEngine) Compact(
 			failErr = fmt.Errorf("provider returned empty summary")
 		}
 		operationErr := fmt.Errorf("compaction summary generation failed: %w", failErr)
-		return false, finishCompaction(ctx, store, session, sessionlog.CompactionPayload{CompactionID: compactionID, Provider: providerName, Model: modelName, Status: "failed", Error: failErr.Error()}, operationErr)
+		return false, failed("", providers.Usage{}, operationErr)
 	}
 	finishReason := providers.NormalizeFinishReason(completion.FinishReason)
 	usage := completion.Usage
 	if finishReason == providers.FinishMaxTokens {
 		operationErr := fmt.Errorf("compaction rejected: summary terminated by max_tokens")
-		return false, finishCompaction(ctx, store, session, sessionlog.CompactionPayload{CompactionID: compactionID, Provider: providerName, Model: modelName, FinishReason: string(finishReason), InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, Status: "failed", Error: operationErr.Error()}, operationErr)
+		return false, failed(string(finishReason), usage, operationErr)
 	}
 
 	rawSummary := strings.TrimSpace(completion.Text)
@@ -273,36 +281,36 @@ func (e *CompactionEngine) Compact(
 	// 4. Validate token reduction: summary must be strictly smaller than shadowed tokens
 	if summaryTokens >= shadowedTokens {
 		operationErr := fmt.Errorf("compaction rejected: summary tokens (%d) >= shadowed tokens (%d)", summaryTokens, shadowedTokens)
-		return false, finishCompaction(ctx, store, session, sessionlog.CompactionPayload{
-			CompactionID: compactionID, Provider: providerName, Model: modelName, FinishReason: string(finishReason), InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, Status: "failed", Error: operationErr.Error(), SummaryTokens: summaryTokens, ShadowedTokens: shadowedTokens,
-		}, operationErr)
+		return false, failed(string(finishReason), usage, operationErr)
 	}
 
 	// 5. Verify Surface range has not changed
 	currentNodes := session.Nodes()
 	if surfaceGeneration(session) != targetGeneration || len(currentNodes) < len(candidateSeqs) {
 		operationErr := fmt.Errorf("surface modified concurrently during compaction")
-		return false, finishCompaction(ctx, store, session, sessionlog.CompactionPayload{CompactionID: compactionID, Provider: providerName, Model: modelName, FinishReason: string(finishReason), InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, Status: "failed", Error: operationErr.Error()}, operationErr)
+		return false, failed(string(finishReason), usage, operationErr)
 	}
 	for i, s := range candidateSeqs {
 		if currentNodes[i] != s {
 			operationErr := fmt.Errorf("surface range shifted concurrently during compaction")
-			return false, finishCompaction(ctx, store, session, sessionlog.CompactionPayload{CompactionID: compactionID, Provider: providerName, Model: modelName, FinishReason: string(finishReason), InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, Status: "failed", Error: operationErr.Error()}, operationErr)
+			return false, failed(string(finishReason), usage, operationErr)
 		}
 	}
 
 	// 6. Append compaction/summary metric.
-	if err := appendCompactionEvent(ctx, store, session, EventCompactionSummary, sessionlog.CompactionPayload{
-		CompactionID: compactionID, Provider: providerName, Model: modelName, FinishReason: string(finishReason), InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, Summary: rawSummary, ShadowedTokens: shadowedTokens, SummaryTokens: summaryTokens, TokensSaved: shadowedTokens - summaryTokens,
-	}); err != nil {
+	summaryPayload := basePayload
+	summaryPayload.FinishReason, summaryPayload.InputTokens, summaryPayload.OutputTokens = string(finishReason), usage.InputTokens, usage.OutputTokens
+	summaryPayload.Summary, summaryPayload.ShadowedTokens, summaryPayload.SummaryTokens = rawSummary, shadowedTokens, summaryTokens
+	summaryPayload.TokensSaved = shadowedTokens - summaryTokens
+	if err := appendCompactionEvent(ctx, store, session, EventCompactionSummary, summaryPayload); err != nil {
 		operationErr := fmt.Errorf("append compaction/summary: %w", err)
-		return false, finishCompaction(ctx, store, session, sessionlog.CompactionPayload{CompactionID: compactionID, Provider: providerName, Model: modelName, FinishReason: string(finishReason), InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, Status: "failed", Error: operationErr.Error()}, operationErr)
+		return false, failed(string(finishReason), usage, operationErr)
 	}
 
 	// 7. Append replacement user/message with surfaceOp: replace(startSeq..endSeq).
 	replaceEvent, err := sessionlog.New(EventUserMessage, replacementMsg)
 	if err != nil {
-		return false, finishCompaction(ctx, store, session, sessionlog.CompactionPayload{CompactionID: compactionID, Provider: providerName, Model: modelName, FinishReason: string(finishReason), InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, Status: "failed", Error: err.Error()}, err)
+		return false, failed(string(finishReason), usage, err)
 	}
 	replaceEvent.Message = replacementMsg
 	replaceEvent.SurfaceOp = &SurfaceOp{
@@ -313,13 +321,15 @@ func (e *CompactionEngine) Compact(
 	replaceEvent.SourceEventSeqs = candidateSeqs
 	if err := appendAndApplySessionEvent(ctx, store, session, replaceEvent); err != nil {
 		operationErr := fmt.Errorf("apply compaction replacement message: %w", err)
-		return false, finishCompaction(ctx, store, session, sessionlog.CompactionPayload{CompactionID: compactionID, Provider: providerName, Model: modelName, FinishReason: string(finishReason), InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, Status: "failed", Error: operationErr.Error()}, operationErr)
+		return false, failed(string(finishReason), usage, operationErr)
 	}
 
 	// 8. Append compaction/end (completed).
-	if err := finishCompaction(ctx, store, session, sessionlog.CompactionPayload{
-		CompactionID: compactionID, Provider: providerName, Model: modelName, FinishReason: string(finishReason), InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, Status: "completed", ShadowedTokens: shadowedTokens, SummaryTokens: summaryTokens, TokensSaved: shadowedTokens - summaryTokens,
-	}, nil); err != nil {
+	completedPayload := basePayload
+	completedPayload.FinishReason, completedPayload.InputTokens, completedPayload.OutputTokens = string(finishReason), usage.InputTokens, usage.OutputTokens
+	completedPayload.Status, completedPayload.ShadowedTokens, completedPayload.SummaryTokens = "completed", shadowedTokens, summaryTokens
+	completedPayload.TokensSaved = shadowedTokens - summaryTokens
+	if err := finishCompaction(ctx, store, session, completedPayload, nil); err != nil {
 		return false, err
 	}
 

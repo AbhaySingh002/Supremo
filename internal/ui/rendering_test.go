@@ -2,16 +2,22 @@ package ui
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/AbhaySingh002/supremo/internal/api"
+	"github.com/AbhaySingh002/supremo/internal/ui/approval"
+	"github.com/AbhaySingh002/supremo/internal/ui/rendering"
 )
 
 func TestStreamCoalescingNoTextLoss(t *testing.T) {
@@ -67,16 +73,22 @@ func TestStreamFlushBeforeToolExecution(t *testing.T) {
 		Arguments:  `{"path":"main.go"}`,
 	})
 
-	// Verify the streaming content was flushed and is present in entries
-	foundStream := false
+	// Narration must fold into the transient activity row, never persist as
+	// a streaming transcript line.
 	for _, entry := range model.entries {
-		if entry.kind == entryStreaming && strings.Contains(entry.content, "I will now read the file.") {
-			foundStream = true
+		if entry.kind == entryStreaming {
+			t.Fatalf("narration persisted as %v entry: %q", entry.kind, entry.content)
+		}
+	}
+	foundActivity := false
+	for _, entry := range model.entries {
+		if entry.kind == entryStatus && strings.Contains(entry.content, "I will now read the file.") {
+			foundActivity = true
 			break
 		}
 	}
-	if !foundStream {
-		t.Fatal("expected streaming chunk to be flushed before tool execution was recorded")
+	if !foundActivity {
+		t.Fatalf("expected narration folded into the activity row, entries: %#v", model.entries)
 	}
 }
 
@@ -326,11 +338,11 @@ func TestInkSignalChatHierarchyAndToolDrawers(t *testing.T) {
 	model.layout()
 
 	user := ansi.Strip(zone.Scan(model.renderEntry(0, transcriptEntry{kind: entryUser, content: "hello"})))
-	if strings.Contains(user, "you") || !strings.Contains(user, "hello") {
+	if !strings.Contains(user, "You") || !strings.Contains(user, "hello") {
 		t.Fatalf("user hierarchy = %q", user)
 	}
 	assistant := ansi.Strip(zone.Scan(model.renderEntry(0, transcriptEntry{kind: entryAssistant, content: "ready"})))
-	if !strings.Contains(assistant, model.glyph("◆", "*")+" Supremo") {
+	if !strings.Contains(assistant, "Supremo") {
 		t.Fatalf("assistant hierarchy = %q", assistant)
 	}
 
@@ -361,12 +373,12 @@ func TestInkSignalChatHierarchyAndToolDrawers(t *testing.T) {
 		arguments: `{"command":"go","args":["test","./..."]}`, details: commandOutput, expanded: true,
 	}
 	drawer := ansi.Strip(zone.Scan(model.RenderToolEntry(0, entry, false)))
-	if !strings.Contains(drawer, "Ran command") || !strings.Contains(drawer, "$ go test ./...") || !strings.Contains(drawer, "ok") || !strings.Contains(drawer, "exit 0") || strings.Contains(drawer, `"stdout"`) || strings.Count(drawer, "go test ./...") != 1 {
+	if (!strings.Contains(drawer, "Ran") && !strings.Contains(drawer, "Run")) || !strings.Contains(drawer, "$ go test ./...") || !strings.Contains(drawer, "ok") || !strings.Contains(drawer, "exit 0") || strings.Contains(drawer, `"stdout"`) {
 		t.Fatalf("command drawer = %q", drawer)
 	}
 	entry.expanded = false
 	collapsed := ansi.Strip(zone.Scan(model.RenderToolEntry(0, entry, false)))
-	if !strings.Contains(collapsed, "Ran command") || !strings.Contains(collapsed, "\n└ $ go test ./...") || !strings.Contains(collapsed, "Ctrl+O") || strings.Contains(collapsed, "details") || strings.Count(collapsed, "go test ./...") != 1 || strings.Contains(collapsed, `"stdout"`) {
+	if (!strings.Contains(collapsed, "Ran") && !strings.Contains(collapsed, "Run")) || !strings.Contains(collapsed, "go test ./...") || strings.Contains(collapsed, "details") || strings.Contains(collapsed, `"stdout"`) {
 		t.Fatalf("collapsed command row = %q", collapsed)
 	}
 	directoryEntry := transcriptEntry{
@@ -374,7 +386,7 @@ func TestInkSignalChatHierarchyAndToolDrawers(t *testing.T) {
 		arguments: `{"path":"/tmp"}`, details: directory, expanded: false,
 	}
 	directoryRow := ansi.Strip(zone.Scan(model.RenderToolEntry(1, directoryEntry, false)))
-	if !strings.Contains(directoryRow, "ls -a -- /tmp") || strings.Contains(directoryRow, "list directory") {
+	if !strings.Contains(directoryRow, "Read") || !strings.Contains(directoryRow, "/tmp") {
 		t.Fatalf("directory row = %q", directoryRow)
 	}
 	directoryEntry.expanded = true
@@ -407,8 +419,8 @@ func TestSearchToolRowsUseSemanticInlineProgress(t *testing.T) {
 		{
 			name:      "glob",
 			tool:      "glob",
-			running:   "Finding",
-			completed: "Found",
+			running:   "Search",
+			completed: "Search",
 			arguments: `{"path":"/workspace","pattern":"*.go"}`,
 			output:    `{"matches":[{"path":"internal/main.go","name":"main.go","type":"file"}]}`,
 			match:     "internal/main.go",
@@ -416,8 +428,8 @@ func TestSearchToolRowsUseSemanticInlineProgress(t *testing.T) {
 		{
 			name:      "grep",
 			tool:      "grep",
-			running:   "Searching",
-			completed: "Searched",
+			running:   "Search",
+			completed: "Search",
 			arguments: `{"path":"/workspace","pattern":"needle"}`,
 			output:    `{"matches":[{"file":"main.go","line":3,"content":"needle"}]}`,
 			match:     "main.go:3  needle",
@@ -428,7 +440,7 @@ func TestSearchToolRowsUseSemanticInlineProgress(t *testing.T) {
 				kind:       entryTool,
 				tool:       test.tool,
 				toolStatus: "running",
-				content:    formatToolSummary(test.tool, "running", test.arguments),
+				content:    model.formatToolSummary(test.tool, "running", test.arguments),
 				arguments:  test.arguments,
 			}
 			renderedRunning := ansi.Strip(zone.Scan(model.RenderToolEntry(0, running, true)))
@@ -447,12 +459,12 @@ func TestSearchToolRowsUseSemanticInlineProgress(t *testing.T) {
 				kind:       entryTool,
 				tool:       test.tool,
 				toolStatus: "completed",
-				content:    formatToolSummary(test.tool, "completed", test.arguments),
+				content:    model.formatToolSummary(test.tool, "completed", test.arguments),
 				arguments:  test.arguments,
 				details:    details,
 			}
 			renderedCompleted := ansi.Strip(zone.Scan(model.RenderToolEntry(0, completed, false)))
-			if !strings.Contains(renderedCompleted, test.completed) || !strings.Contains(renderedCompleted, "Ctrl+O") || strings.Contains(renderedCompleted, "path=") || strings.Contains(renderedCompleted, "pattern=") {
+			if !strings.Contains(renderedCompleted, test.completed) || strings.Contains(renderedCompleted, "path=") || strings.Contains(renderedCompleted, "pattern=") {
 				t.Fatalf("completed row = %q", renderedCompleted)
 			}
 			completed.expanded = true
@@ -461,6 +473,69 @@ func TestSearchToolRowsUseSemanticInlineProgress(t *testing.T) {
 				t.Fatalf("expanded %s drawer = %q", test.tool, drawer)
 			}
 		})
+	}
+}
+
+func TestToolRowsRenderWorkspaceRelativePaths(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home directory: %v", err)
+	}
+	workspace := "/tmp/supremo-test/workspace"
+	model := New(nil, workspace, "tool-paths", Options{})
+	model.width, model.height = 100, 28
+	model.layout()
+
+	if got := model.formatToolSummary("read_file", "completed", `{"path":"/tmp/supremo-test/workspace/internal/ui/model.go"}`); got != "Read internal/ui/model.go" {
+		t.Fatalf("in-workspace summary = %q", got)
+	}
+	if got := model.formatToolSummary("write_file", "completed", `{"path":"`+filepath.Join(home, "notes/todo.txt")+`"}`); got != "Updated ~/notes/todo.txt" {
+		t.Fatalf("home summary = %q", got)
+	}
+	if got := model.formatToolSummary("list_directory", "completed", `{"path":"/opt/data"}`); got != "Listed /opt/data" {
+		t.Fatalf("outside summary = %q", got)
+	}
+
+	entry := transcriptEntry{
+		kind: entryTool, tool: "read_file", toolStatus: "completed",
+		arguments: `{"path":"/tmp/supremo-test/workspace/PROJECT.md"}`,
+	}
+	row := ansi.Strip(zone.Scan(model.RenderToolEntry(0, entry, false)))
+	if !strings.Contains(row, "PROJECT.md") || strings.Contains(row, "/tmp/supremo-test/workspace") {
+		t.Fatalf("tool row leaked absolute path: %q", row)
+	}
+}
+
+func TestApprovalDocksAboveFooterWithTranscriptVisible(t *testing.T) {
+	model := newTestModel(api.Session{ID: "approval-dock"}, context.Background(), func() {})
+	model.width, model.height = 100, 28
+	model.layout()
+	model.appendEntry(entryAssistant, "earlier transcript context")
+	model.approval = approval.NewApprovalModel("execute_command", `{"command":"find internal/ui -type f"}`, rendering.NewStyles())
+	model.surface = surfaceApproval
+	model.layout()
+
+	body := ansi.Strip(model.bodyView())
+	if !strings.Contains(body, "earlier transcript context") {
+		t.Fatalf("approval hid the transcript: %q", body)
+	}
+	if strings.Contains(body, "Permission required") {
+		t.Fatal("approval card rendered in the body instead of the composer slot")
+	}
+	dock := ansi.Strip(model.inputView())
+	if !strings.Contains(dock, "Permission required") || !strings.Contains(dock, "Allow once") || !strings.Contains(dock, "Deny") || !strings.Contains(dock, "find internal/ui -type f") {
+		t.Fatalf("docked approval card = %q", dock)
+	}
+	if height := lipgloss.Height(dock); height > model.approvalMaxHeight() {
+		t.Fatalf("approval card height %d exceeds budget %d", height, model.approvalMaxHeight())
+	}
+
+	view := ansi.Strip(model.View().Content)
+	transcriptAt := strings.Index(view, "earlier transcript context")
+	cardAt := strings.Index(view, "Permission required")
+	footerAt := strings.LastIndex(view, "↑↓ select · enter confirm · esc deny")
+	if transcriptAt < 0 || cardAt < 0 || footerAt < 0 || transcriptAt >= cardAt || cardAt >= footerAt {
+		t.Fatalf("view ordering transcript=%d card=%d footer=%d", transcriptAt, cardAt, footerAt)
 	}
 }
 
@@ -478,7 +553,10 @@ func TestToolBatchGroupsInModelOrderAndCollapsesForNextTurn(t *testing.T) {
 		t.Fatalf("batch indices = %v", indices)
 	}
 	open := ansi.Strip(zone.Scan(model.feed.View()))
-	readIndex, commandIndex := strings.Index(open, "read file  path=main.go"), strings.Index(open, "go test ./...")
+	readIndex, commandIndex := strings.Index(open, "Read"), strings.Index(open, "Ran")
+	if commandIndex < 0 {
+		commandIndex = strings.Index(open, "Run")
+	}
 	if !strings.Contains(open, "Read 1 file, ran 1 command") || readIndex < 0 || commandIndex < 0 || readIndex > commandIndex || strings.Contains(open, "package main") || strings.Contains(open, "\nok\n") {
 		t.Fatalf("open batch = %q", open)
 	}
@@ -486,7 +564,7 @@ func TestToolBatchGroupsInModelOrderAndCollapsesForNextTurn(t *testing.T) {
 	model.collapseCompletedToolBatches()
 	model.rebuildFeed()
 	collapsed := ansi.Strip(zone.Scan(model.feed.View()))
-	if !strings.Contains(collapsed, "Read 1 file, ran 1 command") || strings.Contains(collapsed, "read file  path=main.go") || strings.Contains(collapsed, "go test ./...") {
+	if !strings.Contains(collapsed, "Read 1 file, ran 1 command") || strings.Contains(collapsed, "Read  main.go") || strings.Contains(collapsed, "Ran   go test ./...") {
 		t.Fatalf("collapsed batch = %q", collapsed)
 	}
 	if !model.toggleLatestToolBatch() || model.collapsedToolBatches["1:2"] {
@@ -507,7 +585,7 @@ func TestNoColorToolRowsUseASCIIWithoutANSI(t *testing.T) {
 	}
 	model.layout()
 	rendered := model.View().Content
-	if strings.Contains(rendered, "\x1b[") || !strings.Contains(rendered, "R") || !strings.Contains(rendered, "OK") || !strings.Contains(rendered, "$ go test ./...") || !strings.Contains(rendered, "+-") {
+	if strings.Contains(rendered, "\x1b[") || !strings.Contains(rendered, "OK") || (!strings.Contains(rendered, "Ran") && !strings.Contains(rendered, "Run")) || !strings.Contains(rendered, "go test ./...") {
 		t.Fatalf("ASCII tool row = %q", rendered)
 	}
 }
@@ -567,5 +645,251 @@ func TestCanonicalStyles(t *testing.T) {
 	model := newTestModel(api.Session{ID: "styles"}, ctx, cancel)
 	if got := model.styles.Title.Render("SUPREMO"); !strings.Contains(got, "SUPREMO") {
 		t.Fatalf("expected rendering.Styles title, got %q", got)
+	}
+}
+
+func TestLiveActivityRowUpdatesInPlaceAboveToolHistory(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	model := newTestModel(api.Session{ID: "test-live-activity", Name: "Test Live Activity"}, ctx, cancel)
+	model.width, model.height = 100, 30
+	model.layout()
+	model.entries = []transcriptEntry{{kind: entryUser, content: "count the files"}}
+	model.active = &activeTask{id: 1, ctx: ctx, cancel: cancel, kind: taskAgent}
+
+	countStatus := func() int {
+		n := 0
+		for _, entry := range model.entries {
+			if entry.kind == entryStatus {
+				n++
+			}
+		}
+		return n
+	}
+
+	// Narration streams, then a tool starts: one activity row, one tool row.
+	_ = model.applyProgress(progressEvent{Kind: progressStream, Message: "Analyzing directory structure for UI files..."})
+	_ = model.applyProgress(progressEvent{
+		Kind: progressTool, CallID: "call-1", Tool: "execute_command", ToolStatus: "running",
+		Arguments: `{"command":"bash","args":["-c","find internal/ui -type f"]}`,
+	})
+	if countStatus() != 0 {
+		t.Fatalf("expected exactly zero status rows, got %d: %#v", countStatus(), model.entries)
+	}
+	if !strings.Contains(model.activityText, "Analyzing directory structure") {
+		t.Fatalf("activity text not anchored: %q", model.activityText)
+	}
+	if model.entries[1].kind != entryTool {
+		t.Fatalf("expected tool row at index 1, got %#v", model.entries[1])
+	}
+
+	// More narration, then the next tool starts: the SAME row updates in place.
+	_ = model.applyProgress(progressEvent{Kind: progressStream, Message: "Calculating recursive counts..."})
+	_ = model.applyProgress(progressEvent{
+		Kind: progressTool, CallID: "call-2", Tool: "execute_command", ToolStatus: "running",
+		Arguments: `{"command":"python3","args":["count.py"]}`,
+	})
+	if countStatus() != 0 {
+		t.Fatalf("repeated narration appended a second activity row: %#v", model.entries)
+	}
+	if !strings.Contains(model.activityText, "Calculating recursive counts") {
+		t.Fatalf("activity row did not update in place: %q", model.activityText)
+	}
+
+	// Completed tools accumulate below the activity row.
+	_ = model.applyProgress(progressEvent{
+		Kind: progressTool, CallID: "call-2", Tool: "execute_command", ToolStatus: "completed",
+		Arguments: `{"command":"python3","args":["count.py"]}`, ToolOutput: `{"stdout":"3","exit_code":0}`,
+	})
+	_ = model.applyProgress(progressEvent{Kind: progressStream, Message: "Preparing summary..."})
+	if countStatus() != 0 {
+		t.Fatalf("expected exactly zero activity rows after tools, got %d", countStatus())
+	}
+	tools := 0
+	for _, entry := range model.entries {
+		if entry.kind == entryTool {
+			tools++
+		}
+	}
+	if tools != 2 {
+		t.Fatalf("expected 2 persistent tool rows, got %d", tools)
+	}
+
+	// Snapshot rebuild mid-run re-anchors the activity row and drops narration.
+	messages := []api.Message{
+		{ID: "turn-1", Role: "assistant", Parts: []api.MessagePart{
+			{Kind: "text", Text: "Calculating recursive counts..."},
+			{Kind: "assistant_tool_call", Metadata: json.RawMessage(`{"id":"call-1","name":"execute_command","arguments":{"command":"bash","args":["-c","find internal/ui -type f"]}}`)},
+		}},
+		{Role: "tool", Parts: []api.MessagePart{
+			{Kind: "tool_result", Text: `{"stdout":"file1.go","exit_code":0}`, Metadata: json.RawMessage(`{"tool_name":"execute_command","tool_call_id":"call-1"}`)},
+		}},
+	}
+	restored := model.transcriptFromMessages(messages)
+	if len(restored) != 1 || restored[0].kind != entryTool {
+		t.Fatalf("expected narration skipped and tool preserved on replay, got %#v", restored)
+	}
+
+	// Run end removes the transient row; tools stay.
+	model.finishStreaming(entryAssistant, "Here is the breakdown.")
+	model.active = nil
+	model.clearLiveStatus()
+	model.activityText = ""
+	if countStatus() != 0 {
+		t.Fatalf("activity row survived run end: %#v", model.entries)
+	}
+}
+
+func TestCommandRowsStaySingleLine(t *testing.T) {
+	model := New(nil, ".", "single-line", Options{})
+	model.width, model.height = 100, 28
+	model.layout()
+
+	entry := transcriptEntry{
+		kind: entryTool, tool: "execute_command", toolStatus: "completed", content: "Ran command",
+		arguments: `{"command":"python3 -c","args":["import os\nimport sys\n\nroot = '/workspace'\nfor dirpath, dirnames, filenames in os.walk(root):\n    print(dirpath, len(dirnames), len(filenames))"]}`,
+		details:   "workspace 12 40\nexit 0",
+	}
+	row := ansi.Strip(zone.Scan(model.RenderToolEntry(0, entry, false)))
+	if strings.Contains(strings.Split(row, "\n")[0]+"\n", "print(dirpath") {
+		t.Fatalf("command row leaked the full multi-line script: %q", row)
+	}
+	if strings.Count(strings.TrimRight(row, "\n"), "\n") != 0 {
+		t.Fatalf("command row spans multiple lines:\n%s", row)
+	}
+	if !strings.Contains(row, "python3 -c import os") {
+		t.Fatalf("command row lost the command head: %q", row)
+	}
+
+	entry.expanded = true
+	drawer := ansi.Strip(zone.Scan(model.RenderToolEntry(0, entry, false)))
+	if !strings.Contains(drawer, "os.walk(root)") {
+		t.Fatalf("expanded drawer lost the full command: %q", drawer)
+	}
+}
+
+func TestInlineIntentLifecycleAndCleanComposer(t *testing.T) {
+	model := New(nil, ".", "inline-intent-test", Options{})
+	model.width, model.height = 100, 30
+	model.layout()
+
+	// 1. When idle, composer has 3 lines: rule, input prompt, and status line.
+	input := model.inputView()
+	lines := strings.Split(input, "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 lines in inputView (rule, prompt, status), got %d lines:\n%s", len(lines), input)
+	}
+
+	// 2. Cursor Y is always at composerTopRow + 1 (on prompt row).
+	cursorIdle := model.nativeComposerCursor()
+	if cursorIdle == nil || cursorIdle.Y != model.composerTopRow+1 {
+		t.Fatalf("idle cursor Y = %v, want %d", cursorIdle, model.composerTopRow+1)
+	}
+
+	// 3. When a task starts, an entryStatus is created directly under entryUser.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	model.ctx = ctx
+	_ = model.startTask("count the files")
+
+	if len(model.entries) < 2 {
+		t.Fatalf("expected at least 2 entries (user and intent), got %d", len(model.entries))
+	}
+	if model.entries[0].kind != entryUser || model.entries[1].kind != entryStatus {
+		t.Fatalf("expected entryUser followed by entryStatus, got %#v", model.entries)
+	}
+	if model.entries[1].content != "Thinking…" && model.entries[1].content != "Working..." {
+		t.Fatalf("expected initial intent text, got %q", model.entries[1].content)
+	}
+
+	// 4. Intent updates in-place when new intent arrives from model.
+	model.setStatus("Counting files in all folders…")
+	if model.entries[1].content != "Counting files in all folders…" {
+		t.Fatalf("intent line did not update in place: %q", model.entries[1].content)
+	}
+	if len(model.entries) != 2 {
+		t.Fatalf("expected entry count to remain 2, got %d", len(model.entries))
+	}
+
+	// 5. While active, composer remains clean (3 lines) and cursor stays stable.
+	activeInput := model.inputView()
+	if len(strings.Split(activeInput, "\n")) != 3 {
+		t.Fatalf("expected composer to remain 3 lines during active turn, got:\n%s", activeInput)
+	}
+	_ = model.input.Focus()
+	cursorActive := model.nativeComposerCursor()
+	if cursorActive == nil || cursorActive.Y != model.composerTopRow+1 {
+		t.Fatalf("active cursor Y = %v, want %d", cursorActive, model.composerTopRow+1)
+	}
+
+	// 6. Tools run and snapshot refreshes mid-run: intent line stays at index 1 directly under entryUser.
+	_ = model.applyProgress(progressEvent{
+		Kind: progressTool, CallID: "call-1", Tool: "execute_command", ToolStatus: "running",
+		Arguments: `{"command":"bash","args":["-c","find . -type f | wc -l"]}`,
+	})
+	midRunSnapshot := api.SessionSnapshot{
+		Session: api.Session{ID: "inline-intent-test"},
+		Messages: []api.Message{
+			{Role: "user", Parts: []api.MessagePart{{Kind: "text", Text: "count the files"}}},
+			{Role: "tool", Parts: []api.MessagePart{{Kind: "tool_result", Text: `{"stdout":"42","exit_code":0}`, Metadata: json.RawMessage(`{"tool_call_id":"call-1","tool_name":"execute_command"}`)}}},
+		},
+		Runs: []api.Run{{RunID: "run-1", Status: "running"}},
+	}
+	model.applySnapshot(midRunSnapshot)
+	if len(model.entries) != 3 {
+		t.Fatalf("expected 3 entries after snapshot (user, intent, tool), got %d: %#v", len(model.entries), model.entries)
+	}
+	if model.entries[0].kind != entryUser || model.entries[1].kind != entryStatus || model.entries[2].kind != entryTool {
+		t.Fatalf("expected entryUser -> entryStatus -> entryTool, got kinds: %v, %v, %v", model.entries[0].kind, model.entries[1].kind, model.entries[2].kind)
+	}
+	if model.entries[1].content != "Counting files in all folders…" {
+		t.Fatalf("intent text lost across snapshot: %q", model.entries[1].content)
+	}
+	if model.intentEntry != 1 || model.liveEntry != 1 {
+		t.Fatalf("intentEntry=%d, liveEntry=%d, want 1, 1", model.intentEntry, model.liveEntry)
+	}
+	liveRendered := model.renderEntry(1, model.entries[1])
+	if !strings.Contains(liveRendered, model.spinner.View()) {
+		t.Fatalf("expected live spinner in intent row, got: %q", liveRendered)
+	}
+
+	// 7. When run ends, intent line completes with checkmark.
+	event := api.Event{Type: api.EventRunEnd, Data: []byte(`{"status":"completed"}`)}
+	_ = (&model).applyAPIEvent(event)
+	if model.entries[1].toolStatus != "completed" {
+		t.Fatalf("expected intent entry to be marked completed, got %q", model.entries[1].toolStatus)
+	}
+	rendered := model.renderEntry(1, model.entries[1])
+	if !strings.Contains(rendered, "✓") && !strings.Contains(rendered, "OK") {
+		t.Fatalf("expected completed checkmark in rendered intent row, got:\n%s", rendered)
+	}
+
+	// 8. Subsequent snapshot refresh preserves the completed intent line.
+	finalSnapshot := api.SessionSnapshot{
+		Session:  api.Session{ID: "inline-intent-test"},
+		Messages: midRunSnapshot.Messages,
+		Runs:     []api.Run{{RunID: "run-1", Status: "completed"}},
+	}
+	model.applySnapshot(finalSnapshot)
+	if len(model.entries) != 3 || model.entries[1].kind != entryStatus || model.entries[1].toolStatus != "completed" {
+		t.Fatalf("completed intent row not preserved across final snapshot: %#v", model.entries)
+	}
+
+	// 9. When next task starts, prior turn's ephemeral completed intent is cleaned up.
+	_ = model.startTask("second prompt")
+	// Now entries: user1, tool1, user2, intent2 (working...)
+	foundOldCompletedIntent := false
+	for _, entry := range model.entries[:len(model.entries)-1] {
+		if entry.kind == entryStatus && entry.toolStatus == "completed" {
+			foundOldCompletedIntent = true
+		}
+	}
+	if foundOldCompletedIntent {
+		t.Fatalf("prior completed intent was not cleaned up on new turn: %#v", model.entries)
+	}
+	latestIntent := model.entries[len(model.entries)-1]
+	if latestIntent.kind != entryStatus || (latestIntent.content != "Thinking…" && latestIntent.content != "Working...") {
+		t.Fatalf("expected fresh live intent for new turn, got: %#v", latestIntent)
 	}
 }

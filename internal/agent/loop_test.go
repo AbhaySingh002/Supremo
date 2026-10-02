@@ -266,13 +266,13 @@ func TestExactModelRequestResponseLogging(t *testing.T) {
 
 	agent := &Agent{}
 	agent.logExactModelRequest(session, prompt, false)
-	logExactModelResponse(completion, &parser.Response{
+	LogTurnResponse(completion, &parser.Response{
 		TurnProgress: &models.TurnProgress{Progress: "Read main.go", NextGoal: "Edit main.go", EvidenceUsed: []string{"art-1"}},
 		ToolCalls:    completion.ToolCalls,
 	})
 	LogToolExecution(ToolExecutionLogParams{
 		ToolName: "write_file", ToolCallID: "call-2", RawArguments: `{"path":"main.go"}`,
-		ExecutionMode: "physical", ObservationID: "obs-1", SourceHash: "def", ArtifactID: "art-2",
+		ExecutionMode: "physical", ArtifactID: "art-2",
 		Success: true, Duration: time.Millisecond, Mutations: []string{"file:main.go"}, FreshnessInvalidation: []string{"main.go"},
 	})
 	LogStateTransition(StateTransitionLogParams{
@@ -294,7 +294,7 @@ func TestExactModelRequestResponseLogging(t *testing.T) {
 			t.Fatalf("expected debug log: %v", err)
 		}
 		content := string(data)
-		for _, want := range []string{"TurnID:", "3", "REJECTED CANDIDATES", "stale", "[REDACTED]"} {
+		for _, want := range []string{"turn_id", "3", "rejected", "stale", "REDACTED"} {
 			if !strings.Contains(content, want) {
 				t.Errorf("expected %q in debug log, got:\n%s", want, content)
 			}

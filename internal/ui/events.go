@@ -14,6 +14,7 @@ const (
 	progressIteration   progressKind = "iteration"
 	progressRetry       progressKind = "retry"
 	progressStream      progressKind = "stream"
+	progressThought     progressKind = "thought"
 	progressTool        progressKind = "tool"
 	progressApproval    progressKind = "approval"
 	progressSessionName progressKind = "session_name"
@@ -47,8 +48,13 @@ func progressFromAPI(event api.Event) []progressEvent {
 	switch event.Type {
 	case api.EventAssistantChunk:
 		var payload api.AssistantChunk
-		if json.Unmarshal(event.Data, &payload) == nil && payload.Event.Type == "text_delta" && payload.Event.TextDelta != "" {
-			return []progressEvent{{Kind: progressStream, Message: payload.Event.TextDelta, SessionID: event.SessionID}}
+		if json.Unmarshal(event.Data, &payload) == nil {
+			if payload.Event.Type == "text_delta" && payload.Event.TextDelta != "" {
+				return []progressEvent{{Kind: progressStream, Message: payload.Event.TextDelta, SessionID: event.SessionID}}
+			}
+			if payload.Event.Type == "reasoning_delta" && payload.Event.ReasoningDelta != "" {
+				return []progressEvent{{Kind: progressThought, Message: payload.Event.ReasoningDelta, SessionID: event.SessionID}}
+			}
 		}
 	case api.EventToolCall:
 		var payload api.ToolCall

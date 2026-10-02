@@ -186,7 +186,7 @@ func durableToolCalls(messages []api.Message) map[string]durableToolCall {
 	return calls
 }
 
-func transcriptFromMessages(messages []api.Message) []transcriptEntry {
+func (m Model) transcriptFromMessages(messages []api.Message) []transcriptEntry {
 	calls := durableToolCalls(messages)
 	entries := make([]transcriptEntry, 0, len(messages))
 	for _, message := range messages {
@@ -200,19 +200,29 @@ func transcriptFromMessages(messages []api.Message) []transcriptEntry {
 		if content == "" && message.Role != "tool" {
 			continue
 		}
+		hasToolCalls := false
+		for _, part := range message.Parts {
+			if part.Kind == "assistant_tool_call" {
+				hasToolCalls = true
+				break
+			}
+		}
 		switch message.Role {
 		case "user":
 			entries = append(entries, transcriptEntry{kind: entryUser, content: content})
 		case "assistant":
-			entries = append(entries, transcriptEntry{kind: entryAssistant, content: content})
+			// Narration attached to tool calls is transient activity, not history.
+			if !hasToolCalls && content != "" {
+				entries = append(entries, transcriptEntry{kind: entryAssistant, content: content})
+			}
 		case "tool":
 			tool, callID, artifactID := toolMessageIdentity(message)
-			summary := formatToolSummary(tool, "completed", "")
+			summary := m.formatToolSummary(tool, "completed", "")
 			arguments := ""
 			if call, ok := calls[callID]; ok {
 				arguments = string(call.Arguments)
-				if summary = formatToolSummary(call.Name, "completed", arguments); summary == "" {
-					summary = formatToolSummary(tool, "completed", arguments)
+				if summary = m.formatToolSummary(call.Name, "completed", arguments); summary == "" {
+					summary = m.formatToolSummary(tool, "completed", arguments)
 				}
 			}
 			details := toolResultDetails(tool, content)

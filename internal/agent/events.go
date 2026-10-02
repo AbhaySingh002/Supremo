@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"github.com/AbhaySingh002/supremo/internal/parser/models"
 	"github.com/AbhaySingh002/supremo/internal/tools"
 )
 
@@ -12,13 +11,11 @@ const (
 	ProgressIteration   ProgressKind = "iteration"
 	ProgressRetry       ProgressKind = "retry"
 	ProgressStream      ProgressKind = "stream"
+	ProgressThought     ProgressKind = "thought"
 	ProgressTool        ProgressKind = "tool"
 	ProgressApproval    ProgressKind = "approval"
 	ProgressSessionName ProgressKind = "session_name"
-	ProgressPhase       ProgressKind = "phase"
 	ProgressCompletion  ProgressKind = "completion"
-	ProgressChecklist   ProgressKind = "checklist"
-	ProgressCheckpoint  ProgressKind = "checkpoint"
 	ProgressDebug       ProgressKind = "debug"
 	ProgressActivity    ProgressKind = "activity"
 )
@@ -36,7 +33,6 @@ type ProgressEvent struct {
 	ToolOutput string
 	Diff       string
 	StepID     string
-	Checklist  *models.TaskChecklist
 }
 
 func (a *Agent) emit(event ProgressEvent) {

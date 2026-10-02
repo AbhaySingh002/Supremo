@@ -96,7 +96,7 @@ func parseUserError(raw string) userError {
 
 func (m Model) formatUserError(raw string, width int) string {
 	info := parseUserError(raw)
-	header := m.styles.Error.Render(m.glyph("×", "!") + " " + info.Title)
+	header := "  " + m.styles.ToolFailure.Render(m.glyph("✗", "!")) + " " + m.styles.Error.Render(info.Title)
 	if info.Explanation == "" && info.Action == "" {
 		return header
 	}

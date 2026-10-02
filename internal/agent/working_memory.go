@@ -28,35 +28,20 @@ type CurrentFocus struct {
 	LastFailure      string   `json:"last_failure,omitempty"`
 }
 
-// WorkingMemory represents the structured, compact working state of an agent
-// during long-running tasks. It is model working memory, not ground truth.
+// WorkingMemory is the structured, compact working state of an agent during
+// long-running tasks. It is model working memory, not ground truth. Objective
+// and ActiveStepObjective feed the context compiler; ApplyDirectives and
+// UpdateFocusAfterTurn write the rest.
 type WorkingMemory struct {
-	SchemaVersion           int           `json:"schema_version"`
-	SessionID               string        `json:"session_id"`
-	TaskID                  string        `json:"task_id,omitempty"`
-	Generation              int64         `json:"generation"`
-	Objective               string        `json:"objective"`
-	ActiveStepID            string        `json:"active_step_id,omitempty"`
-	ActiveStepObjective     string        `json:"active_step_objective,omitempty"`
-	UserRequirements        []string      `json:"user_requirements,omitempty"`
-	HardConstraints         []string      `json:"hard_constraints,omitempty"`
-	AcceptedDecisions       []string      `json:"accepted_decisions,omitempty"`
-	UnresolvedQuestions     []string      `json:"unresolved_questions,omitempty"`
-	CompletedStepSummaries  []string      `json:"completed_step_summaries,omitempty"`
-	CurrentWork             string        `json:"current_work,omitempty"`
-	CurrentFocus            *CurrentFocus `json:"current_focus,omitempty"`
-	RemainingWork           []string      `json:"remaining_work,omitempty"`
-	KnownRepositoryFacts    []string      `json:"known_repository_facts,omitempty"`
-	ImportantObservations   []string      `json:"important_observations,omitempty"`
-	NegativeObservations    []string      `json:"negative_observations,omitempty"`
-	ImportantFailures       []string      `json:"important_failures,omitempty"`
-	LatestVerificationState string        `json:"latest_verification_state,omitempty"`
-	RelevantFilesSymbols    []string      `json:"relevant_files_symbols,omitempty"`
-	EvidenceArtifactIDs     []string      `json:"evidence_artifact_ids,omitempty"`
-	WorkspaceRevision       string        `json:"workspace_revision,omitempty"`
-	NextIntendedActions     []string      `json:"next_intended_actions,omitempty"`
-	CompactSummary          string        `json:"compact_summary,omitempty"`
-	UpdatedAt               time.Time     `json:"updated_at"`
+	SchemaVersion        int           `json:"schema_version"`
+	SessionID            string        `json:"session_id"`
+	TaskID               string        `json:"task_id,omitempty"`
+	Objective            string        `json:"objective"`
+	ActiveStepObjective  string        `json:"active_step_objective,omitempty"`
+	CurrentFocus         *CurrentFocus `json:"current_focus,omitempty"`
+	KnownRepositoryFacts []string      `json:"known_repository_facts,omitempty"`
+	EvidenceArtifactIDs  []string      `json:"evidence_artifact_ids,omitempty"`
+	UpdatedAt            time.Time     `json:"updated_at"`
 }
 
 // ApplyDirectives applies advisory model memory updates to the working memory state.
@@ -226,7 +211,6 @@ func (m *WorkingMemoryManager) Save(ctx context.Context, memory *WorkingMemory) 
 		ExpectedVersion: version,
 		Provenance: state.Provenance{
 			Authority:           state.AuthorityDerived,
-			WorkspaceRevisionID: memory.WorkspaceRevision,
 			EvidenceArtifactIDs: memory.EvidenceArtifactIDs,
 			ObservedAt:          memory.UpdatedAt,
 		},
@@ -234,10 +218,7 @@ func (m *WorkingMemoryManager) Save(ctx context.Context, memory *WorkingMemory) 
 			SessionID: memory.SessionID,
 			Type:      "working_memory.compacted",
 			Payload: map[string]any{
-				"task_id":            memory.TaskID,
-				"generation":         memory.Generation,
-				"active_step_id":     memory.ActiveStepID,
-				"workspace_revision": memory.WorkspaceRevision,
+				"task_id": memory.TaskID,
 			},
 		},
 	})

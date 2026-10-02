@@ -192,3 +192,38 @@ func TestInteractionResponseCannotCrossSessions(t *testing.T) {
 		t.Fatalf("cross-session interaction response = %v", err)
 	}
 }
+
+func TestSubscribeDeliversEphemeralReasoningProgress(t *testing.T) {
+	store, _ := backendTestStore(t)
+	runtimes := agent.NewRuntimeManager(func(string) (*agent.Agent, error) {
+		return nil, nil
+	})
+	service := &Service{store: store, runtimes: runtimes, started: true}
+	stream, err := service.Subscribe(context.Background(), api.SubscribeRequest{SessionID: "chat"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+
+	runtimes.EmitProgress(agent.ProgressEvent{
+		Kind:      agent.ProgressThought,
+		SessionID: "chat",
+		Message:   "analyzing repository structure",
+	})
+
+	select {
+	case event := <-stream.Events():
+		if event.Type != api.EventAssistantChunk || event.Durable {
+			t.Fatalf("expected non-durable assistant chunk, got %#v", event)
+		}
+		var chunk api.AssistantChunk
+		if err := json.Unmarshal(event.Data, &chunk); err != nil {
+			t.Fatal(err)
+		}
+		if chunk.Event.Type != "reasoning_delta" || chunk.Event.ReasoningDelta != "analyzing repository structure" {
+			t.Fatalf("unexpected chunk event: %#v", chunk.Event)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for ephemeral reasoning event")
+	}
+}

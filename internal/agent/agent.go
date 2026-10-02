@@ -41,7 +41,7 @@ type ToolObservation struct {
 // contextLifecycle is the private context pipeline used by Agent. Production
 // always receives RealContextBuilder; tests can substitute this narrow seam.
 type contextLifecycle interface {
-	Compile(context.Context, ContextRequest) (*models.Prompt, error)
+	Prepare(context.Context, ContextRequest) (*PreparedContext, error)
 	RecordObjective(ctx context.Context, sessionID, taskID, objective string) error
 	RecordUsage(context.Context, *models.Prompt, providers.Usage) error
 	ObserveTool(context.Context, string, string, ToolObservation) error
@@ -57,10 +57,6 @@ func (p *PreparedContext) Commit(ctx context.Context) error {
 		return nil
 	}
 	return p.commit(ctx)
-}
-
-type contextPreparer interface {
-	Prepare(context.Context, ContextRequest) (*PreparedContext, error)
 }
 
 // TranscriptStore keeps durable transcript data separate from prompt selection.
@@ -185,12 +181,8 @@ func (a *Agent) taskContext(ctx context.Context, session *Session) (context.Cont
 	return ctx, cancel, nil
 }
 
-// appendMemory tags durable work with its selected live task. Provider-facing
+// appendMessage tags durable work with its selected live task. Provider-facing
 // messages stay unchanged; this is solely local context bookkeeping.
-func (a *Agent) appendMemory(ctx context.Context, session *Session, role models.Role, content string) error {
-	return a.appendMessage(ctx, session, models.Message{Role: role, Content: content})
-}
-
 func (a *Agent) appendMessage(ctx context.Context, session *Session, message models.Message) error {
 	if a.transcript == nil || session == nil {
 		return nil
@@ -267,7 +259,7 @@ func NewAgent(
 		retryWait:        waitForProviderRetry,
 		hooks:            hooks,
 		retryPolicy:      runtime.NewDefaultRetryPolicy(),
-		pressureManager:  NewRealContextPressureManager(nil, nil, nil),
+		pressureManager:  NewRealContextPressureManager(),
 		maxParallelTools: 4,
 	}
 }
@@ -299,14 +291,7 @@ func (a *Agent) prepareContext(ctx context.Context, request ContextRequest) (*Pr
 	if a.contextLifecycle == nil {
 		return nil, fmt.Errorf("agent context pipeline is required")
 	}
-	if preparer, ok := a.contextLifecycle.(contextPreparer); ok {
-		return preparer.Prepare(ctx, request)
-	}
-	prompt, err := a.contextLifecycle.Compile(ctx, request)
-	if err != nil {
-		return nil, err
-	}
-	return &PreparedContext{Prompt: prompt}, nil
+	return a.contextLifecycle.Prepare(ctx, request)
 }
 
 func (a *Agent) recordObjective(ctx context.Context, session *Session, objective string) error {
@@ -600,7 +585,7 @@ func (a *Agent) prepareOne(ctx context.Context, sessionID, taskID string, call m
 		res.Reused = before.Reused
 		obs := NewObservation(call.Name, toolRes, nil)
 		_, cArgs, _, _ := state.ComputeCallFingerprint(call.Name, call.Arguments, a.workspace)
-		logResolvedToolExecution(call, string(cArgs), "cached", obs, "", "", nil, 0, nil)
+		logResolvedToolExecution(call, string(cArgs), "cached", obs, nil, 0, nil)
 		res.Success = true
 		res.Status = tools.ToolStatusCompleted
 		res.Outcome = tools.ToolOutcomeSuccess
@@ -627,7 +612,7 @@ func (a *Agent) dispatchPrepared(prepared preparedToolCall) ToolExecutionResult 
 	if !desc.Inspection {
 		invalidations = mutatingInvalidation(scope, obs)
 	}
-	logResolvedToolExecution(call, string(cArgs), "physical", obs, "", "", err, time.Since(start), invalidations)
+	logResolvedToolExecution(call, string(cArgs), "physical", obs, err, time.Since(start), invalidations)
 
 	res.Success = obs.Success && (outcome == tools.ToolOutcomeSuccess)
 	res.Status = obs.Status

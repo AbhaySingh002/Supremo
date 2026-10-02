@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/AbhaySingh002/supremo/internal/parser"
 	"github.com/AbhaySingh002/supremo/internal/parser/models"
 	"github.com/AbhaySingh002/supremo/internal/providers"
 	"github.com/AbhaySingh002/supremo/internal/sessionlog"
@@ -26,6 +27,7 @@ type streamDiagnosticRecorder struct {
 	step      int
 	attempt   int
 	assembler *providers.AssistantAssembler
+	tagParser *parser.StreamTagParser
 	sources   []int64
 	finishSet bool
 	errorSet  bool
@@ -42,14 +44,33 @@ func newStreamDiagnosticRecorder(a *Agent, ctx context.Context, session *Session
 	if prompt != nil {
 		activeTools = prompt.ActiveTools
 	}
-	return &streamDiagnosticRecorder{
+	rec := &streamDiagnosticRecorder{
 		agent: a, ctx: ctx, session: session, prompt: prompt, turn: turn, step: step, attempt: attempt,
-		assembler: providers.NewAssistantAssembler(activeTools, func(delta string) {
-			if a != nil {
-				a.emit(ProgressEvent{Kind: ProgressStream, Message: delta})
-			}
-		}),
 	}
+	rec.tagParser = parser.NewStreamTagParser(func(tag, delta string, complete bool) {
+		if a == nil || delta == "" {
+			return
+		}
+		if tag == "thought" {
+			a.emit(ProgressEvent{Kind: ProgressThought, Message: delta})
+		} else if tag == "status" {
+			a.emit(ProgressEvent{Kind: ProgressActivity, Message: delta})
+		} else {
+			a.emit(ProgressEvent{Kind: ProgressStream, Message: delta})
+		}
+	})
+	rec.assembler = providers.NewAssistantAssemblerWithReasoning(activeTools, func(delta string) {
+		if rec.tagParser != nil {
+			rec.tagParser.Feed(delta)
+		} else if a != nil {
+			a.emit(ProgressEvent{Kind: ProgressStream, Message: delta})
+		}
+	}, func(reasoningDelta string) {
+		if a != nil {
+			a.emit(ProgressEvent{Kind: ProgressThought, Message: reasoningDelta})
+		}
+	})
+	return rec
 }
 
 func (r *streamDiagnosticRecorder) Begin() error {
@@ -183,7 +204,7 @@ func (r *streamDiagnosticRecorder) persist(event providers.StreamEvent) error {
 	case providers.StreamEventError:
 		return r.RecordError(event.Err)
 	case providers.StreamEventReasoningDelta:
-		// Reasoning remains available to assembly but intentionally is not durable.
+		// Reasoning remains available to live progress but intentionally is not durable.
 		return nil
 	}
 	return nil
@@ -221,6 +242,9 @@ func (r *streamDiagnosticRecorder) RecordRetry(delayMillis int64, err error) err
 }
 
 func (r *streamDiagnosticRecorder) Assemble() (*providers.Completion, error) {
+	if r.tagParser != nil {
+		r.tagParser.Flush()
+	}
 	completion, err := r.assembler.Assemble()
 	if err != nil {
 		return nil, err

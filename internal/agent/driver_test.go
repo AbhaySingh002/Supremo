@@ -24,18 +24,18 @@ type driverLifecycle struct {
 	activeTools []string
 }
 
-func (l *driverLifecycle) Compile(_ context.Context, request ContextRequest) (*models.Prompt, error) {
+func (l *driverLifecycle) Prepare(_ context.Context, request ContextRequest) (*PreparedContext, error) {
 	history := append([]models.Message(nil), request.Session.DeriveMessages()...)
 	l.histories = append(l.histories, history)
 	activeTools := l.activeTools
 	if len(activeTools) == 0 {
 		activeTools = []string{"probe"}
 	}
-	return &models.Prompt{
+	return &PreparedContext{Prompt: &models.Prompt{
 		Messages:    history,
 		ActiveTools: activeTools,
 		Metadata:    models.PromptMetadata{Profile: string(protocol.Conversational)},
-	}, nil
+	}}, nil
 }
 func (*driverLifecycle) RecordObjective(context.Context, string, string, string) error { return nil }
 func (*driverLifecycle) RecordUsage(context.Context, *models.Prompt, providers.Usage) error {
@@ -742,7 +742,7 @@ func TestRepairSessionTailClosesDanglingToolAndBoundaries(t *testing.T) {
 		{Seq: 1, Type: EventStepStart},
 		{Seq: 2, Type: EventAssistantMessage, Message: models.Message{Role: models.RoleAssistant, ToolCalls: []models.ToolCall{{ID: "c1", Name: "probe"}}}},
 	}
-	extra := repairSessionTail(events)
+	extra := sessionlog.RepairTail(events)
 	if len(extra) != 3 || extra[0].Type != EventToolResult || extra[0].Message.ToolCallID != "c1" || extra[1].Type != EventStepEnd || extra[2].Type != EventTurnEnd {
 		t.Fatalf("extra=%#v", extra)
 	}

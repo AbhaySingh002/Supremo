@@ -208,6 +208,12 @@ func doJSON(ctx context.Context, client *http.Client, method, endpoint, apiKey s
 }
 
 func doJSONStream(ctx context.Context, client *http.Client, endpoint, apiKey, accept string, body any) (io.ReadCloser, http.Header, error) {
+	headers := make(http.Header)
+	headers.Set("Accept", accept)
+	return doJSONStreamWithHeaders(ctx, client, endpoint, apiKey, headers, body)
+}
+
+func doJSONStreamWithHeaders(ctx context.Context, client *http.Client, endpoint, apiKey string, headers http.Header, body any) (io.ReadCloser, http.Header, error) {
 	start := time.Now()
 	logging.Info("HTTP streaming request starting: endpoint=%s", endpoint)
 	if logging.IsEnabled() && body != nil {
@@ -215,8 +221,6 @@ func doJSONStream(ctx context.Context, client *http.Client, endpoint, apiKey, ac
 			logging.Debug("HTTP wire streaming request payload (endpoint=%s): %s", endpoint, string(data))
 		}
 	}
-	headers := make(http.Header)
-	headers.Set("Accept", accept)
 	req, err := jsonRequest(ctx, http.MethodPost, endpoint, apiKey, headers, body)
 	if err != nil {
 		logging.Error("HTTP streaming request build error: %v", err)

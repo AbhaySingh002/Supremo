@@ -435,13 +435,13 @@ func TestOpenRouterProviderClassifiesChoiceErrorAsTransient(t *testing.T) {
 	}
 }
 
-func TestOpenRouterProviderDoesNotStreamAndClassifiesHTTPFailures(t *testing.T) {
+func TestOpenRouterProviderStreamsAndClassifiesHTTPFailures(t *testing.T) {
 	provider, err := NewOpenRouterProvider(context.Background(), "test-key", "vendor/model", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := any(provider).(StreamProvider); ok {
-		t.Fatal("OpenRouter provider implements StreamProvider")
+	if _, ok := any(provider).(StreamProvider); !ok {
+		t.Fatal("OpenRouter provider should implement StreamProvider")
 	}
 
 	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusRequestEntityTooLarge, http.StatusTooManyRequests, http.StatusServiceUnavailable} {
@@ -573,6 +573,127 @@ func TestGroqProviderStreamsChatCompletions(t *testing.T) {
 	}
 	if got := strings.Join(chunks, ""); got != completion.Text {
 		t.Fatalf("chunks = %q, completion = %q", got, completion.Text)
+	}
+}
+
+func TestAnthropicProviderStreamsMessages(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/messages" {
+			t.Fatalf("request = %s %s, want POST /messages", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("x-api-key"); got != "test-anthropic-key" {
+			t.Errorf("x-api-key = %q", got)
+		}
+		if got := r.Header.Get("anthropic-version"); got != "2023-06-01" {
+			t.Errorf("anthropic-version = %q", got)
+		}
+		if got := r.Header.Get("Accept"); got != "text/event-stream" {
+			t.Errorf("accept = %q", got)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: message_start\n")
+		fmt.Fprint(w, "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10}}}\n\n")
+		fmt.Fprint(w, "event: content_block_start\n")
+		fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+		fmt.Fprint(w, "event: content_block_delta\n")
+		fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello from Claude\"}}\n\n")
+		fmt.Fprint(w, "event: content_block_stop\n")
+		fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+		fmt.Fprint(w, "event: message_delta\n")
+		fmt.Fprint(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\n")
+		fmt.Fprint(w, "event: message_stop\n")
+		fmt.Fprint(w, "data: {\"type\":\"message_stop\"}\n\n")
+	}))
+	defer server.Close()
+
+	provider, err := NewAnthropicProvider(context.Background(), "test-anthropic-key", "claude-3-5-sonnet", server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var chunks []string
+	assembler := NewAssistantAssembler(nil, func(chunk string) { chunks = append(chunks, chunk) })
+	err = provider.Stream(context.Background(), &models.Prompt{System: "sys", Messages: []models.Message{{Role: models.RoleUser, Content: "hi"}}}, assembler.Feed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completion, err := assembler.Assemble()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completion.Text != "Hello from Claude" || completion.FinishReason != "stop" || completion.Usage.InputTokens != 10 || completion.Usage.OutputTokens != 5 {
+		t.Fatalf("completion = %#v", completion)
+	}
+	if got := strings.Join(chunks, ""); got != "Hello from Claude" {
+		t.Fatalf("chunks = %q", got)
+	}
+}
+
+func TestMistralProviderStreamsChatCompletions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/chat/completions" {
+			t.Fatalf("request = %s %s, want POST /chat/completions", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-mistral-key" {
+			t.Errorf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Mistral\"}}]}\n\n")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\" stream\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":2}}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider, err := NewMistralProvider(context.Background(), "test-mistral-key", "mistral-medium-latest", server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var chunks []string
+	assembler := NewAssistantAssembler(nil, func(chunk string) { chunks = append(chunks, chunk) })
+	err = provider.Stream(context.Background(), &models.Prompt{Messages: []models.Message{{Role: models.RoleUser, Content: "hi"}}}, assembler.Feed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completion, err := assembler.Assemble()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completion.Text != "Mistral stream" || completion.FinishReason != "stop" || completion.Usage.InputTokens != 4 || completion.Usage.OutputTokens != 2 {
+		t.Fatalf("completion = %#v", completion)
+	}
+}
+
+func TestOpenRouterProviderStreamsChatCompletions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/chat/completions" {
+			t.Fatalf("request = %s %s, want POST /chat/completions", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-openrouter-key" {
+			t.Errorf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"OpenRouter\"}}]}\n\n")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\" stream\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2}}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider, err := NewOpenRouterProvider(context.Background(), "test-openrouter-key", "vendor/model", server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var chunks []string
+	assembler := NewAssistantAssembler(nil, func(chunk string) { chunks = append(chunks, chunk) })
+	err = provider.Stream(context.Background(), &models.Prompt{Messages: []models.Message{{Role: models.RoleUser, Content: "hi"}}}, assembler.Feed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completion, err := assembler.Assemble()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completion.Text != "OpenRouter stream" || completion.FinishReason != "stop" || completion.Usage.InputTokens != 5 || completion.Usage.OutputTokens != 2 {
+		t.Fatalf("completion = %#v", completion)
 	}
 }
 

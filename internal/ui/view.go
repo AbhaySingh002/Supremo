@@ -5,7 +5,6 @@ import (
 	"strings"
 	"unicode"
 
-	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -99,9 +98,6 @@ func (m Model) bodyView() string {
 	if m.surface == surfacePlanQuestion && m.planQuestion != nil {
 		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, m.planQuestion.View(width, height))
 	}
-	if m.surface == surfaceApproval && m.approval != nil {
-		return m.approval.View(width, height)
-	}
 	if m.diffOpen() {
 		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, m.diffInspectorView())
 	}
@@ -119,7 +115,7 @@ func (m Model) bodyView() string {
 				m.styles.Title.Render("SUPREMO"),
 				m.styles.Muted.Render(ansi.Truncate(provider, max(1, width-2), "…")),
 				m.styles.Text.Render("Agentic coding in your local workspace"),
-				m.styles.Muted.Render("Enter send · / commands · ? help"),
+				m.styles.Muted.Render("Enter send · / commands · F1 help"),
 			}, "\n")
 		}
 		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, welcome)
@@ -151,7 +147,7 @@ func (m Model) welcomeView() string {
 		m.styles.Muted.Render(providerInfo),
 		"",
 		m.styles.Text.Render("Agentic coding in your local workspace"),
-		m.styles.Muted.Render("Enter send  ·  Ctrl+P plan  ·  / commands  ·  ? help"),
+		m.styles.Muted.Render("Enter send  ·  Ctrl+P plan  ·  / commands  ·  F1 help"),
 	}
 	return strings.Join(lines, "\n")
 }
@@ -161,13 +157,23 @@ func (m Model) debugView() string {
 }
 
 func (m Model) inputView() string {
+	if m.surface == surfaceApproval && m.approval != nil {
+		return m.approval.View(m.contentWidth(), m.approvalMaxHeight())
+	}
 	if m.surface != surfaceNone {
 		return ""
 	}
-	prompt := ""
-	if m.planDraft {
-		prompt = m.styles.Accent.Render("plan") + " "
+
+	rule := m.styles.ComposerRule.Render(strings.Repeat("─", max(1, m.contentWidth())))
+	if m.styles.Ascii {
+		rule = m.styles.ComposerRule.Render(strings.Repeat("-", max(1, m.contentWidth())))
 	}
+
+	prompt := m.styles.Accent.Render(m.glyph("❯", ">"))
+	if m.planDraft {
+		prompt = m.styles.Accent.Render("plan") + " " + prompt
+	}
+
 	var leftSide string
 	if m.selection.active() && m.selection.input {
 		raw := m.composerView()
@@ -183,25 +189,19 @@ func (m Model) inputView() string {
 	if layout := m.composerLayout(); len(layout.rows) > layout.visibleRows {
 		scrollHint := fmt.Sprintf(" · lines %d–%d of %d", layout.scrollRow+1, min(len(layout.rows), layout.scrollRow+layout.visibleRows), len(layout.rows))
 		statusLine += m.styles.Muted.Render(scrollHint)
-	} else {
-		statusLine += m.styles.Muted.Render(" · Ctrl+J newline")
 	}
-	style := m.styles.ComposerBorder
-	if m.focus == focusComposer && m.input.Focused() {
-		style = m.styles.ComposerFocused
-	}
-	statusLine = ansi.Truncate(prompt+statusLine, max(1, m.contentWidth()-style.GetHorizontalFrameSize()), "…")
-	btnWidth := 6
-	leftWidth := max(10, m.contentWidth()-btnWidth-4)
-	left := m.styles.ComposerBase.Width(leftWidth).Render(leftSide)
-	button := m.sendButtonView()
 
-	inputRow := lipgloss.JoinHorizontal(lipgloss.Bottom, left, " ", button)
+	statusLine = ansi.Truncate(statusLine, max(1, m.contentWidth()), "…")
+	button := m.sendButtonView()
+	leftWidth := max(10, m.contentWidth()-8)
+	inputRow := prompt + " " + lipgloss.NewStyle().Width(leftWidth).Render(leftSide) + " " + button
+
 	composerContent := strings.Join([]string{
-		m.styles.Status.Render(statusLine),
+		rule,
 		zone.Mark("composer-input", inputRow),
+		m.styles.Status.Render(statusLine),
 	}, "\n")
-	return style.Width(max(1, m.contentWidth())).Render(composerContent)
+	return lipgloss.NewStyle().Width(max(1, m.contentWidth())).Render(composerContent)
 }
 
 func (m Model) mentionComposerView() string {
@@ -250,8 +250,8 @@ func (m Model) nativeComposerCursor() *tea.Cursor {
 	}
 	row := layout.rows[rowIndex]
 	prefix := m.renderComposerRow(layout.projection, row.Start, min(display, row.End))
-	x := ansi.StringWidth(prefix) + m.styles.ComposerFocused.GetBorderLeftSize() + m.styles.ComposerFocused.GetPaddingLeft()
-	y := m.composerTopRow + m.styles.ComposerFocused.GetBorderTopSize() + m.styles.ComposerFocused.GetPaddingTop() + 1 + rowIndex - layout.scrollRow
+	x := ansi.StringWidth(prefix) + 2
+	y := m.composerTopRow + 1 + rowIndex - layout.scrollRow
 	cursor := m.input.Cursor()
 	if cursor == nil {
 		cursor = tea.NewCursor(0, 0)
@@ -392,9 +392,9 @@ func (m Model) renderComposerRow(projection composer.MentionProjection, start, e
 
 func (m Model) sendButtonView() string {
 	if strings.TrimSpace(m.input.Value()) == "" {
-		return zone.Mark("send-button", m.styles.Muted.Render("send"))
+		return zone.Mark("send-button", m.styles.Muted.Render("↵"))
 	}
-	return zone.Mark("send-button", m.styles.Accent.Render("send ↵"))
+	return zone.Mark("send-button", m.styles.Accent.Render("↵"))
 }
 
 func (m Model) planModeStatus() string {
@@ -447,12 +447,8 @@ func orderedSelection(selection *textSelection) (startX, startY, endX, endY int)
 }
 
 func (m Model) helpView() string {
-	groups := [][]key.Binding{
-		{m.keys.Composer.Submit, m.keys.Composer.Newline, m.keys.Composer.Complete},
-		{m.keys.Composer.Plans, m.keys.Composer.ToggleMode, m.keys.Composer.ToggleDebug},
-		{m.keys.Feed.PgUp, m.keys.Feed.PgDown, m.keys.Feed.Bottom},
-		{m.keys.Composer.Clear, m.keys.Composer.Help, m.keys.Composer.Cancel},
-	}
-	body := m.help.FullHelpView(groups) + "\n\n" + m.styles.Muted.Render("Commands: /copy · /diff · /export · /mode · /plan · /tools")
+	body := m.help.FullHelpView(m.keys.Composer.FullHelp()) + "\n\n" +
+		m.help.FullHelpView(m.keys.Feed.FullHelp()) + "\n\n" +
+		m.styles.Muted.Render("Commands: /copy · /diff · /export · /mode · /plan · /tools")
 	return components.Card(m.styles.Overlay, max(24, min(m.width-8, 64)), m.styles.Title.Render("SHORTCUTS & COMMANDS"), body)
 }

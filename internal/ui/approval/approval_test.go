@@ -21,19 +21,19 @@ func TestApprovalModelAllowDenyEditAuto(t *testing.T) {
 
 	// 1. View rendering
 	view := model.View(80, 20)
-	if !strings.Contains(view, "Approval required") || !strings.Contains(view, "Run shell command?") || !strings.Contains(view, "1. Yes, allow once") || !strings.Contains(view, "> 4. No") {
+	if !strings.Contains(view, "Permission required") || !strings.Contains(view, "Run shell command?") || !strings.Contains(view, "Allow once") || !strings.Contains(view, "Deny") {
 		t.Fatalf("unexpected approval view:\n%s", view)
 	}
 
-	// 2. Enter uses the safe default denial.
+	// 2. Enter uses the default allow-once approval.
 	_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("expected command on Enter")
 	}
 	msg := cmd()
 	act, ok := msg.(approval.ApprovalActionMsg)
-	if !ok || act.Action != "deny" {
-		t.Fatalf("expected default deny action, got %#v", msg)
+	if !ok || act.Action != "approve" {
+		t.Fatalf("expected default approve action, got %#v", msg)
 	}
 	model, _ = model.Update(tea.KeyPressMsg{Code: '2', Text: "2"})
 	_, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -118,7 +118,7 @@ func TestApprovalBodyScrollsWithoutHidingActions(t *testing.T) {
 	if height := lipgloss.Height(view); height > 12 {
 		t.Fatalf("approval height = %d, want <= 12\n%s", height, view)
 	}
-	if !strings.Contains(view, "1. Yes, allow once") || !strings.Contains(view, "4. No") {
+	if !strings.Contains(view, "Allow once") || !strings.Contains(view, "Deny") {
 		t.Fatalf("approval actions were clipped:\n%s", view)
 	}
 	model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnd})

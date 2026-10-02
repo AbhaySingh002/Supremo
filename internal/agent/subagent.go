@@ -164,10 +164,6 @@ func (m *SubagentManager) Start(ctx context.Context, request SubagentRequest) (S
 	return m.Wait(ctx, parent.ID, childID, messageID)
 }
 
-func (m *SubagentManager) createChild(ctx context.Context, child *Session, descriptor sessionlog.SubagentDescriptorPayload, queued sessionlog.SubagentQueuedPayload) error {
-	return m.createChildIdempotent(ctx, child, descriptor, queued, "")
-}
-
 func (m *SubagentManager) createChildIdempotent(ctx context.Context, child *Session, descriptor sessionlog.SubagentDescriptorPayload, queued sessionlog.SubagentQueuedPayload, idempotencyKey string) error {
 	data, err := json.MarshalIndent(child, "", "  ")
 	if err != nil {
