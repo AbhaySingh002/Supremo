@@ -12,41 +12,76 @@
 <br/>
 
 <p align="center">
-  <a href="#quickstart">Quickstart</a> &nbsp;•&nbsp;
-  <a href="#visual-overview">Visual Tour</a> &nbsp;•&nbsp;
-  <a href="#key-pillars">Core Pillars</a> &nbsp;•&nbsp;
-  <a href="#safety--approvals">Safety & Approvals</a> &nbsp;•&nbsp;
-  <a href="#runtime-architecture">Architecture</a> &nbsp;•&nbsp;
-  <a href="#command-reference">Reference</a>
-</p>
-
----
-
-<p align="center">
-  <a href="docs/architecture/init.png">
-    <img src="docs/architecture/init.png" alt="Supremo Welcome Screen" width="100%" />
-  </a>
-</p>
-<p align="center">
-  <sub><strong>Launch Canvas:</strong> Real-time token budget meter (<code>0k/1048k</code>), active model indicator, approval state badge, and keystroke-driven controls.</sub>
-</p>
-
-<br/>
-
-<p align="center">
-  <a href="docs/architecture/demo.png">
-    <img src="docs/architecture/demo.png" alt="Supremo Live Tool Execution" width="100%" />
-  </a>
-</p>
-<p align="center">
-  <sub><strong>Autonomous Execution:</strong> Real-time streamed reasoning, bounded shell execution, precise answer generation, and deterministic token accounting.</sub>
+  <a href="#-quick-install">Quick Install</a> &nbsp;•&nbsp;
+  <a href="#-interactive-demo">Demo</a> &nbsp;•&nbsp;
+  <a href="#-why-supremo">Why Supremo?</a> &nbsp;•&nbsp;
+  <a href="#-interface-tour">Interface Tour</a> &nbsp;•&nbsp;
+  <a href="#-safety--approvals">Safety & Approvals</a> &nbsp;•&nbsp;
+  <a href="#-headless--automation">Headless & CI</a> &nbsp;•&nbsp;
+  <a href="#-reference">Reference</a>
 </p>
 
 </div>
 
 ---
 
-## Why Supremo?
+## ⚡ Quick Install
+
+Install the latest verified release with a single command:
+
+#### macOS & Linux
+```sh
+curl -fsSL https://raw.githubusercontent.com/AbhaySingh002/Supremo/main/scripts/install.sh | sh
+```
+
+#### Windows (PowerShell)
+```powershell
+irm https://raw.githubusercontent.com/AbhaySingh002/Supremo/main/scripts/install.ps1 | iex
+```
+
+<details>
+<summary><strong>Alternative: Via Go (1.24+) or Build from Source</strong></summary>
+
+<br/>
+
+**Via Go install:**
+```sh
+go install github.com/AbhaySingh002/supremo/cmd/supremo@latest
+```
+
+**Build from source:**
+```sh
+git clone https://github.com/AbhaySingh002/Supremo.git
+cd Supremo
+make build
+./supremo --version
+```
+</details>
+
+---
+
+## 🖥️ Interactive Demo
+
+<table>
+  <tr>
+    <th align="left">&nbsp;🔴&nbsp;&nbsp;🟡&nbsp;&nbsp;🟢&nbsp;&nbsp;&nbsp;<b>Supremo — Agentic Terminal Execution</b></th>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="docs/architecture/demo.png">
+        <img src="docs/architecture/demo.png" alt="Supremo Live Tool Execution" width="100%" />
+      </a>
+    </td>
+  </tr>
+</table>
+
+<p align="center">
+  <sub><strong>Autonomous Execution:</strong> Real-time streamed reasoning, bounded shell execution, precise answer generation, and deterministic token accounting.</sub>
+</p>
+
+---
+
+## 💡 Why Supremo?
 
 Most AI coding tools wrap language models in opaque cloud infrastructure with hidden prompt injections and unpredictable context retention. **Supremo** is engineered from first principles as an auditable, local-first engineering partner:
 
@@ -85,83 +120,53 @@ Most AI coding tools wrap language models in opaque cloud infrastructure with hi
 
 ---
 
-## Quickstart
+## 🚀 Interface Tour
 
-### 1. Install Supremo
-
-#### Unix (macOS & Linux)
-```sh
-curl -fsSL https://raw.githubusercontent.com/AbhaySingh002/Supremo/main/scripts/install.sh | sh
-```
-
-#### Windows (PowerShell)
-```powershell
-irm https://raw.githubusercontent.com/AbhaySingh002/Supremo/main/scripts/install.ps1 | iex
-```
-
-#### Via Go (1.24+)
-```sh
-go install github.com/AbhaySingh002/supremo/cmd/supremo@latest
-```
-
-<details>
-<summary><strong>Build from Source</strong></summary>
-
-```sh
-git clone https://github.com/AbhaySingh002/Supremo.git
-cd Supremo
-make build
-./supremo --version
-```
-</details>
-
----
-
-### 2. Launch an Interactive Session
-
-Navigate to any repository and start Supremo:
+Launch Supremo inside any repository or workspace:
 
 ```sh
 cd /path/to/your/project
 supremo
 ```
 
-Within the TUI, configure your provider and model in seconds:
+<table>
+  <tr>
+    <th align="left">&nbsp;🔴&nbsp;&nbsp;🟡&nbsp;&nbsp;🟢&nbsp;&nbsp;&nbsp;<b>Supremo — Launch Canvas & Session State</b></th>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="docs/architecture/init.png">
+        <img src="docs/architecture/init.png" alt="Supremo Welcome Screen" width="100%" />
+      </a>
+    </td>
+  </tr>
+</table>
 
-1. **Configure Provider**: Type `/provider` to select Anthropic, OpenAI, Mistral, OpenRouter, or a custom OpenAI-compatible endpoint (e.g. Ollama, vLLM). Enter your API key in the masked credential prompt.
-2. **Select Model**: Type `/model` to search and switch models with real-time capability checks.
-3. **Index Workspace**: Type `/init` to snapshot repository files and load existing workspace guidelines (`AGENTS.md`, `README.md`).
-4. **Prompt**: Ask Supremo to inspect your codebase, plan changes, or run tests:
-   ```text
-   explain the authentication flow and run the unit tests
-   ```
+<p align="center">
+  <sub><strong>Launch Canvas:</strong> Real-time token budget meter (<code>0k/1048k</code>), active model indicator, approval state badge, and keystroke-driven controls.</sub>
+</p>
+
+### Key Interface Primitives
+
+1. **Top Status & Telemetry Bar**
+   - **Workspace Path**: Active working directory and repository root.
+   - **Provider & Model Chip**: Currently active provider routing and model ID.
+   - **Approval Badge**: Active safety mode (`ask risky` in default `batman` mode).
+   - **Token Budget Meter**: Live progress meter tracking exact request/response token usage against provider window limits.
+
+2. **Transcript Feed & Tool Execution**
+   - **Live Thought Streams**: Real-time parsed reasoning steps (`· Finalizing response`, `· Searching files`).
+   - **Tool Actions**: Explicit execution indicators with arguments and exit status (`✓ Ran`, `✓ Wrote`, `✓ Read`).
+   - **Collapsible Batches**: Press <kbd>Space</kbd> to collapse or expand tool execution groups.
+
+3. **Bottom Composer**
+   - **Prompt Input**: Multiline text editor with full history search (<kbd>Ctrl</kbd>+<kbd>R</kbd>).
+   - **Workspace Mentions**: Type `@` to fuzzy-search and inject files or directories into context.
+   - **Command Palette**: Type `/` to open the searchable slash-command catalog.
 
 ---
 
-## Visual Overview
-
-### Top Bar & Telemetry Meter
-```text
-SUPREMO  ~/Desktop/Projects/supermo  openrouter · google/gemini-3.6-flash  ask risky  [▓░░░░░░░░░] 4k/1048k
-```
-- **Workspace Path**: Active working directory and git root.
-- **Provider & Model Chip**: Currently active model routing and provider status.
-- **Approval Badge**: Active safety mode (`ask risky` in default `batman` mode).
-- **Token Budget Meter**: Real-time context consumption against model window limits.
-
-### Transcript & Tool Pipeline
-- **Live Streamed Reasoning**: Model thoughts and status steps stream directly into the feed.
-- **Tool Invocations**: Shell commands, filesystem edits, and search operations are recorded with exit statuses (`✓ Ran`, `✓ Wrote`, `✓ Read`).
-- **Collapsible Batches**: Press <kbd>Space</kbd> to collapse or expand tool execution groups.
-
-### Bottom Composer
-- **Prompt Input**: Multiline text input with history search (<kbd>Ctrl</kbd>+<kbd>R</kbd>).
-- **Workspace Mentions**: Type `@` to fuzzy-search and attach files or directories into context.
-- **Command Palette**: Type `/` to open the searchable slash-command menu.
-
----
-
-## Safety & Approvals
+## 🛡️ Safety & Approvals
 
 Supremo never executes arbitrary mutations behind your back. Every session runs under an explicit approval policy:
 
@@ -177,7 +182,7 @@ Supremo never executes arbitrary mutations behind your back. Every session runs 
 
 ---
 
-## Headless & Automation
+## 🤖 Headless & Automation
 
 Supremo integrates cleanly into shell scripts, CI/CD pipelines, and editor extensions.
 
@@ -206,7 +211,7 @@ The daemon outputs its loopback endpoint and bearer token as JSON on startup, al
 
 ---
 
-## Command & Keyboard Reference
+## ⌨️ Command & Keyboard Reference
 
 ### Essential Slash Commands
 | Command | Action |
@@ -238,7 +243,7 @@ The daemon outputs its loopback endpoint and bearer token as JSON on startup, al
 
 ---
 
-## Architecture
+## 🏛️ Architecture
 
 Supremo enforces clean package boundaries with complete separation between frontend interaction, orchestration, and provider adapters:
 
@@ -272,7 +277,7 @@ For deeper architectural details, request lifecycles, and subagent orchestration
 
 ---
 
-## Contributing & Development
+## 🤝 Contributing & Development
 
 We welcome contributions! Please review our core guidelines before submitting pull requests:
 
