@@ -5,12 +5,23 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/AbhaySingh002/supremo/internal/api"
 )
+
+func waitForZone(id string) *zone.ZoneInfo {
+	for i := 0; i < 50; i++ {
+		if z := zone.Get(id); z != nil {
+			return z
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return nil
+}
 
 func TestBubbleZoneMouseInteractions(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -31,7 +42,7 @@ func TestBubbleZoneMouseInteractions(t *testing.T) {
 	}
 
 	// 2. Click tool row expands tool details
-	toolZone := zone.Get("tool-1")
+	toolZone := waitForZone("tool-1")
 	if toolZone != nil {
 		clickMsg := tea.MouseClickMsg(tea.Mouse{
 			X:      toolZone.StartX + 1,
@@ -51,7 +62,7 @@ func TestBubbleZoneMouseInteractions(t *testing.T) {
 	model.layout()
 	_ = model.View() // scan new zones
 
-	unreadZone := zone.Get("unread-pill")
+	unreadZone := waitForZone("unread-pill")
 	if unreadZone != nil {
 		clickMsg := tea.MouseClickMsg(tea.Mouse{
 			X:      unreadZone.StartX + 1,
@@ -77,7 +88,7 @@ func TestToolDetailsUseOneArtifactAwareOpenPath(t *testing.T) {
 	model.layout()
 	_ = model.View()
 
-	toolZone := zone.Get("tool-0")
+	toolZone := waitForZone("tool-0")
 	if toolZone == nil {
 		t.Fatal("tool row did not expose a click zone")
 	}
@@ -121,7 +132,7 @@ func TestCollapsedShellCommandBranchClickOpensDetails(t *testing.T) {
 	model.layout()
 	_ = model.View()
 
-	toolZone := zone.Get("tool-0")
+	toolZone := waitForZone("tool-0")
 	if toolZone == nil || toolZone.EndY < toolZone.StartY {
 		t.Fatalf("collapsed shell command did not expose a click zone: %#v", toolZone)
 	}
@@ -153,7 +164,7 @@ func TestExpandedToolDetailsScrollWithKeyboardAndMouse(t *testing.T) {
 	}
 
 	_ = model.View()
-	details := zone.Get("tool-details-0")
+	details := waitForZone("tool-details-0")
 	if details == nil {
 		t.Fatal("expanded terminal panel did not expose a scroll zone")
 	}
@@ -306,7 +317,7 @@ func TestToolRowClickAndAttachedFilesDisplay(t *testing.T) {
 	_ = model.View()
 
 	// 3. Click tool row using zoneInRow (e.g. clicking anywhere on row)
-	toolZone := zone.Get("tool-1")
+	toolZone := waitForZone("tool-1")
 	if toolZone != nil {
 		clickMsg := tea.MouseClickMsg(tea.Mouse{
 			X:      toolZone.StartX + 50, // click past text
