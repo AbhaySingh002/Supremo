@@ -76,3 +76,49 @@ func TestRenderMarkdownMalformedMath(t *testing.T) {
 		t.Fatalf("expected preserved content, got:\n%s", rendered)
 	}
 }
+
+func TestRenderMarkdownModernElements(t *testing.T) {
+	rendering.ClearGlamourCache()
+
+	markdown := `# Main Heading
+
+## Sub Heading
+
+---
+
+- First item
+- Second item with ` + "`inline_code`" + `
+
+> Important note
+`
+
+	rendered, err := rendering.RenderMarkdownContent(markdown, 80, 80)
+	if err != nil {
+		t.Fatalf("RenderMarkdownContent failed: %v", err)
+	}
+
+	plain := ansi.Strip(rendered)
+
+	// Check H1 and H2 left-bar prefixes
+	if !strings.Contains(plain, "▌ Main Heading") {
+		t.Fatalf("expected H1 to have '▌ ' prefix, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "▌ Sub Heading") {
+		t.Fatalf("expected H2 to have '▌ ' prefix, got:\n%s", plain)
+	}
+
+	// Check smooth horizontal rule
+	if !strings.Contains(plain, "────────") {
+		t.Fatalf("expected smooth horizontal rule '────', got:\n%s", plain)
+	}
+
+	// Check list item bullets
+	if !strings.Contains(plain, "•") {
+		t.Fatalf("expected list bullet '•', got:\n%s", plain)
+	}
+
+	// Check blockquote prefix
+	if !strings.Contains(plain, "▌ Important note") {
+		t.Fatalf("expected blockquote prefix, got:\n%s", plain)
+	}
+}

@@ -50,26 +50,93 @@ func CachedGlamourRenderer(width, wordWrap int) (*glamour.TermRenderer, error) {
 
 func supremoMarkdownStyle() ansi.StyleConfig {
 	style := glamourstyles.DarkStyleConfig
-	text, muted, focus, link, code, surface := "#E8EAF0", "#A7ADB8", "#E8B84A", "#66B8D4", "#E29A61", "#171C24"
+
+	text := "#E2E8F0"
+	muted := "#64748B"
+	h1Color := "#E8B84A"
+	h2Color := "#38BDF8"
+	h3Color := "#F8FAFC"
+	codeColor := "#E29A61"
+	codeBg := "#171C24"
+	hrColor := "#334155"
+	bulletColor := "#38BDF8"
+	quoteBarColor := "#E8B84A"
+	linkCol := "#38BDF8"
+	tableBorder := "#334155"
+
 	bold := true
+	italic := true
 	margin := uint(0)
+
 	style.Document.Margin = &margin
 	style.Document.Color = &text
 	style.Paragraph.Color = &text
-	style.Heading.Color, style.Heading.Bold = &text, &bold
-	style.H1 = style.Heading
-	style.H1.Prefix, style.H1.Suffix, style.H1.BackgroundColor = "", "", nil
-	style.H2.Prefix, style.H2.Color = "", &focus
-	style.H3.Prefix, style.H3.Color = "", &text
-	style.H4.Prefix, style.H4.Color = "", &text
-	style.H5.Prefix, style.H5.Color = "", &text
-	style.H6.Prefix, style.H6.Color = "", &muted
-	style.Item.Color, style.Enumeration.Color = &text, &text
-	style.Link.Color, style.LinkText.Color = &link, &link
-	style.Code.Color, style.Code.BackgroundColor = &code, &surface
-	style.CodeBlock.Color = &text
+
+	// Headings
+	style.Heading.Bold = &bold
+	style.Heading.Color = &text
+
+	style.H1.Color = &h1Color
+	style.H1.Bold = &bold
+	style.H1.Prefix = "▌ "
+	style.H1.Suffix = ""
+	style.H1.BackgroundColor = nil
+
+	style.H2.Color = &h2Color
+	style.H2.Bold = &bold
+	style.H2.Prefix = "▌ "
+	style.H2.Suffix = ""
+
+	style.H3.Color = &h3Color
+	style.H3.Bold = &bold
+	style.H3.Prefix = "▎ "
+	style.H3.Suffix = ""
+
+	style.H4.Color = &text
+	style.H4.Bold = &bold
+	style.H4.Prefix = "· "
+
+	style.H5.Color = &muted
+	style.H5.Prefix = "· "
+
+	style.H6.Color = &muted
+	style.H6.Prefix = "· "
+
+	// Inline code: warm orange text with visible surface pill and padding
+	style.Code.Color = &codeColor
+	style.Code.BackgroundColor = &codeBg
+	style.Code.Prefix = " "
+	style.Code.Suffix = " "
+
+	// Code blocks with syntax highlighting
 	style.CodeBlock.Margin = &margin
-	style.BlockQuote.Color = &muted
+	style.CodeBlock.Theme = "nord"
+
+	// Horizontal Rule: subtle smooth line
+	style.HorizontalRule.Color = &hrColor
+	style.HorizontalRule.Format = "\n────────────────────────────────────────\n"
+
+	// Lists
+	style.Item.Color = &bulletColor
+	style.Item.BlockPrefix = "• "
+	style.Enumeration.Color = &h2Color
+
+	// Blockquote: vertical gold bar
+	style.BlockQuote.Color = &quoteBarColor
+	style.BlockQuote.Italic = &italic
+	style.BlockQuote.IndentToken = func() *string { s := "▌ "; return &s }()
+
+	// Links
+	style.Link.Color = &linkCol
+	style.LinkText.Color = &linkCol
+	style.LinkText.Bold = &bold
+
+	// Table borders
+	style.Table.Color = &tableBorder
+	style.Table.CenterSeparator = func() *string { s := "┼"; return &s }()
+	style.Table.ColumnSeparator = func() *string { s := "│"; return &s }()
+	style.Table.RowSeparator = func() *string { s := "─"; return &s }()
+
 	return style
 }
 
