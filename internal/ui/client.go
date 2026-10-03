@@ -146,6 +146,22 @@ func configureProviderCmd(ctx context.Context, client api.Client, request api.Co
 	}
 }
 
+type providerDeletedMsg struct {
+	provider   string
+	initialize api.InitializeResult
+	err        error
+}
+
+func deleteProviderCmd(ctx context.Context, client api.Client, provider string) tea.Cmd {
+	return func() tea.Msg {
+		if client == nil {
+			return providerDeletedMsg{provider: provider, err: errors.New("backend is unavailable")}
+		}
+		initialized, err := client.DeleteProvider(ctx, api.DeleteProviderRequest{Provider: provider})
+		return providerDeletedMsg{provider: provider, initialize: initialized, err: err}
+	}
+}
+
 func submitPromptCmd(ctx context.Context, client api.Client, sessionID, prompt, display string, id int) tea.Cmd {
 	key := idempotencyKey()
 	return func() tea.Msg {

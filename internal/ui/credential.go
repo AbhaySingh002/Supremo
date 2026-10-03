@@ -25,26 +25,28 @@ const (
 const customProviderID = "custom"
 
 type credentialSetup struct {
-	provider api.Provider
-	name     textinput.Model
-	endpoint textinput.Model
-	key      textinput.Model
-	model    textinput.Model
-	custom   bool
-	step     credentialStep
-	loading  bool
-	err      string
-	styles   rendering.Styles
+	provider    api.Provider
+	oldProvider string
+	name        textinput.Model
+	endpoint    textinput.Model
+	key         textinput.Model
+	model       textinput.Model
+	custom      bool
+	step        credentialStep
+	loading     bool
+	err         string
+	styles      rendering.Styles
 }
 
 type credentialCancelledMsg struct{}
 
 type credentialSubmittedMsg struct {
-	provider   string
-	endpoint   string
-	key        string
-	model      string
-	openModels bool
+	provider    string
+	oldProvider string
+	endpoint    string
+	key         string
+	model       string
+	openModels  bool
 }
 
 func newCredentialSetup(provider api.Provider, styles rendering.Styles) *credentialSetup {
@@ -54,6 +56,19 @@ func newCredentialSetup(provider api.Provider, styles rendering.Styles) *credent
 func newCustomCredentialSetup(styles rendering.Styles) *credentialSetup {
 	provider := api.Provider{ID: "openai-compatible", Name: "Custom OpenAI-compatible", RequiresEndpoint: true}
 	return newCredentialSetupWithMode(provider, styles, true)
+}
+
+func newCustomCredentialEditSetup(provider api.Provider, styles rendering.Styles) *credentialSetup {
+	rawName := strings.TrimPrefix(provider.ID, "openai-compatible:")
+	setup := newCredentialSetupWithMode(provider, styles, true)
+	setup.oldProvider = provider.ID
+	setup.name.SetValue(rawName)
+	setup.endpoint.SetValue(provider.Endpoint)
+	if len(provider.Models) > 0 {
+		setup.model.SetValue(provider.Models[0].ID)
+	}
+	setup.key.Placeholder = "(configured · leave blank to keep)"
+	return setup
 }
 
 func newCredentialSetupWithMode(provider api.Provider, styles rendering.Styles, custom bool) *credentialSetup {
@@ -182,7 +197,14 @@ func (m *credentialSetup) submit() tea.Cmd {
 	}
 	endpoint, key, model := strings.TrimSpace(m.endpoint.Value()), m.key.Value(), strings.TrimSpace(m.model.Value())
 	return func() tea.Msg {
-		return credentialSubmittedMsg{provider: provider, endpoint: endpoint, key: key, model: model, openModels: !m.custom}
+		return credentialSubmittedMsg{
+			provider:    provider,
+			oldProvider: m.oldProvider,
+			endpoint:    endpoint,
+			key:         key,
+			model:       model,
+			openModels:  !m.custom,
+		}
 	}
 }
 

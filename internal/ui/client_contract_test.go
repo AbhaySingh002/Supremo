@@ -24,6 +24,7 @@ type behaviorClient struct {
 	response   api.RespondInteractionRequest
 	catalog    api.ModelCatalog
 	configured api.ConfigureProviderRequest
+	deleted    api.DeleteProviderRequest
 	artifact   api.Artifact
 }
 
@@ -54,6 +55,11 @@ func (c *behaviorClient) ListModels(_ context.Context, _ api.ListModelsRequest) 
 func (c *behaviorClient) ConfigureProvider(_ context.Context, request api.ConfigureProviderRequest) (api.InitializeResult, error) {
 	c.configured = request
 	return api.InitializeResult{Provider: valueOr(request.Provider, "openai"), Model: valueOr(request.Model, "gpt-test"), CredentialReady: true}, nil
+}
+
+func (c *behaviorClient) DeleteProvider(_ context.Context, request api.DeleteProviderRequest) (api.InitializeResult, error) {
+	c.deleted = request
+	return api.InitializeResult{Provider: "gemini", Model: "gemini-3.6-flash", CredentialReady: true}, nil
 }
 
 func (c *behaviorClient) GetArtifact(_ context.Context, _ api.ArtifactRequest) (api.Artifact, error) {

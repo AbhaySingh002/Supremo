@@ -317,7 +317,13 @@ func (m *Model) openProviderSelector() {
 		if provider.ID == customProviderID {
 			description = "name, endpoint, API key, and model"
 		}
-		choices = append(choices, selectors.Provider{ID: provider.ID, Name: provider.Name, Description: description, Active: provider.ID == m.provider})
+		choices = append(choices, selectors.Provider{
+			ID:          provider.ID,
+			Name:        provider.Name,
+			Description: description,
+			Active:      provider.ID == m.provider,
+			Custom:      provider.Custom || (strings.HasPrefix(provider.ID, "openai-compatible:") && provider.ID != customProviderID),
+		})
 	}
 	selector := selectors.NewProviderSelector(choices, theme.Default())
 	width, height := m.selectorSize()
@@ -387,6 +393,17 @@ func (m *Model) openCustomCredential() tea.Cmd {
 	m.surface = surfaceCredential
 	m.input.Blur()
 	m.credential = newCustomCredentialSetup(m.styles)
+	m.layout()
+	return m.credential.focus()
+}
+
+func (m *Model) openCustomCredentialEdit(provider api.Provider) tea.Cmd {
+	m.paletteOpen = false
+	m.providerSelector, m.modelSelector = nil, nil
+	m.priorFocus, m.focus = m.focus, focusOverlay
+	m.surface = surfaceCredential
+	m.input.Blur()
+	m.credential = newCustomCredentialEditSetup(provider, m.styles)
 	m.layout()
 	return m.credential.focus()
 }

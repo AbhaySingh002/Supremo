@@ -206,6 +206,9 @@ func (s *Server) dispatch(ctx context.Context, request api.RPCRequest) (any, err
 	case "provider.configure":
 		var params api.ConfigureProviderRequest
 		return call(ctx, request.Params, &params, s.backend.ConfigureProvider)
+	case "provider.delete":
+		var params api.DeleteProviderRequest
+		return call(ctx, request.Params, &params, s.backend.DeleteProvider)
 	case "provider.refresh":
 		if err := noParams(request.Params); err != nil {
 			return nil, err

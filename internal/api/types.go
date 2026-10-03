@@ -27,6 +27,7 @@ type Client interface {
 	GetArtifact(context.Context, ArtifactRequest) (Artifact, error)
 	ListModels(context.Context, ListModelsRequest) (ModelCatalog, error)
 	ConfigureProvider(context.Context, ConfigureProviderRequest) (InitializeResult, error)
+	DeleteProvider(context.Context, DeleteProviderRequest) (InitializeResult, error)
 	RefreshProviderMetadata(context.Context) (InitializeResult, error)
 	ProviderUsage(context.Context) (Usage, error)
 
@@ -155,6 +156,7 @@ type Provider struct {
 	Configured       bool      `json:"configured"`
 	Endpoint         string    `json:"endpoint,omitempty"`
 	RequiresEndpoint bool      `json:"requires_endpoint,omitempty"`
+	Custom           bool      `json:"custom,omitempty"`
 	MetadataState    string    `json:"metadata_state,omitempty"`
 	MetadataWarning  string    `json:"metadata_warning,omitempty"`
 	FetchedAt        time.Time `json:"fetched_at,omitempty"`
@@ -320,11 +322,16 @@ type Artifact struct {
 }
 
 type ConfigureProviderRequest struct {
-	Provider *string `json:"provider,omitempty"`
-	Model    *string `json:"model,omitempty"`
-	Endpoint *string `json:"endpoint,omitempty"`
-	APIKey   *string `json:"api_key,omitempty"`
-	Verify   bool    `json:"verify,omitempty"`
+	Provider    *string `json:"provider,omitempty"`
+	OldProvider *string `json:"old_provider,omitempty"`
+	Model       *string `json:"model,omitempty"`
+	Endpoint    *string `json:"endpoint,omitempty"`
+	APIKey      *string `json:"api_key,omitempty"`
+	Verify      bool    `json:"verify,omitempty"`
+}
+
+type DeleteProviderRequest struct {
+	Provider string `json:"provider"`
 }
 
 type Usage struct {

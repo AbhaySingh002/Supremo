@@ -87,6 +87,16 @@ func executeCommandCmd(ctx context.Context, client api.Client, registry *command
 		case commands.Auth:
 			result.output = "Open the secure credential prompt with /auth."
 		case commands.Provider:
+			if len(intent.Args) >= 2 && intent.Args[0] == "delete" {
+				target := intent.Args[1]
+				if !strings.HasPrefix(target, "openai-compatible:") {
+					target = "openai-compatible:" + target
+				}
+				initialized, callErr := client.DeleteProvider(ctx, api.DeleteProviderRequest{Provider: target})
+				name := strings.TrimPrefix(target, "openai-compatible:")
+				result.initialize, result.err, result.output = &initialized, callErr, "Deleted custom provider "+name+"."
+				break
+			}
 			provider := intent.Args[0]
 			request := api.ConfigureProviderRequest{Provider: &provider}
 			if len(intent.Args) == 2 {

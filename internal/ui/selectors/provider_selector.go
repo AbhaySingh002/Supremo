@@ -47,11 +47,18 @@ type Provider struct {
 	Name         string
 	Description  string
 	Active       bool
+	Custom       bool
 }
 
 // ProviderSelectedMsg is emitted when the user confirms the highlighted
 // provider. The parent decides how to persist or activate it.
 type ProviderSelectedMsg struct{ ID string }
+
+// ProviderEditMsg is emitted when the user wants to edit a custom provider.
+type ProviderEditMsg struct{ ID string }
+
+// ProviderDeleteMsg is emitted when the user confirms deletion of a custom provider.
+type ProviderDeleteMsg struct{ ID string }
 
 // ModelSelectedMsg is emitted when a model is confirmed.
 type ModelSelectedMsg struct {
@@ -85,6 +92,8 @@ type ProviderSelector struct {
 	height       int
 	compact      bool
 	KeyMap       KeyMap
+	deleting     *Provider
+	deleteError  string
 }
 
 // NewProviderSelector creates a searchable provider selection model.
@@ -183,8 +192,48 @@ func (m ProviderSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
+		if m.deleting != nil {
+			switch strings.ToLower(msg.String()) {
+			case "y", "enter":
+				id := m.deleting.ID
+				m.deleting = nil
+				m.deleteError = ""
+				return m, func() tea.Msg { return ProviderDeleteMsg{ID: id} }
+			case "n", "esc":
+				m.deleting = nil
+				m.deleteError = ""
+				return m, nil
+			default:
+				return m, nil
+			}
+		}
+
+		if !m.model {
+			flatItems := m.flatVisibleItems()
+			if len(flatItems) > 0 && m.cursor >= 0 && m.cursor < len(flatItems) {
+				item := flatItems[m.cursor]
+				isCustom := item.Custom || (strings.HasPrefix(item.ID, "openai-compatible:") && item.ID != "custom")
+				if isCustom {
+					switch msg.String() {
+					case "d", "ctrl+d":
+						if item.Active {
+							m.deleteError = "Cannot delete the active provider. Switch first with /provider."
+							return m, nil
+						}
+						m.deleteError = ""
+						m.deleting = &item
+						return m, nil
+					case "e", "ctrl+e":
+						m.deleteError = ""
+						return m, func() tea.Msg { return ProviderEditMsg{ID: item.ID} }
+					}
+				}
+			}
+		}
+
 		switch {
 		case key.Matches(msg, m.KeyMap.Dismiss):
+			m.deleteError = ""
 			if m.search.Value() != "" {
 				m.search.Reset()
 				m.cursor = 0
@@ -194,6 +243,7 @@ func (m ProviderSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg { return ProviderSelectorDismissedMsg{} }
 
 		case key.Matches(msg, m.KeyMap.Select):
+			m.deleteError = ""
 			flatItems := m.flatVisibleItems()
 			if len(flatItems) > 0 && m.cursor >= 0 && m.cursor < len(flatItems) {
 				item := flatItems[m.cursor]
@@ -205,6 +255,7 @@ func (m ProviderSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case key.Matches(msg, m.KeyMap.Up):
+			m.deleteError = ""
 			flatItems := m.flatVisibleItems()
 			if len(flatItems) > 0 {
 				m.cursor = max(0, m.cursor-1)
@@ -212,6 +263,7 @@ func (m ProviderSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case key.Matches(msg, m.KeyMap.Down):
+			m.deleteError = ""
 			flatItems := m.flatVisibleItems()
 			if len(flatItems) > 0 {
 				m.cursor = min(len(flatItems)-1, m.cursor+1)
@@ -570,7 +622,21 @@ func (m ProviderSelector) View() tea.View {
 	if len(rows) > bodyHeight && len(flatItems) > 0 {
 		scrollInfo = fmt.Sprintf("(%d/%d) · ", m.cursor+1, len(flatItems))
 	}
-	footer := m.muted.Render(truncate(scrollInfo+"↑↓ navigate  ·  enter select  ·  esc close", innerWidth))
+	var footer string
+	if m.deleting != nil {
+		footer = m.design.Base.Foreground(m.design.Error).Bold(true).Render(
+			truncate(fmt.Sprintf("Are you sure you want to delete %s? (y/n)", m.deleting.Name), innerWidth),
+		)
+	} else if m.deleteError != "" {
+		footer = m.design.Base.Foreground(m.design.Warning).Render(
+			truncate(m.deleteError, innerWidth),
+		)
+	} else if !m.model && len(flatItems) > 0 && m.cursor >= 0 && m.cursor < len(flatItems) &&
+		(flatItems[m.cursor].Custom || (strings.HasPrefix(flatItems[m.cursor].ID, "openai-compatible:") && flatItems[m.cursor].ID != "custom")) {
+		footer = m.muted.Render(truncate(scrollInfo+"↑↓ navigate  ·  enter select  ·  e edit  ·  d delete  ·  esc close", innerWidth))
+	} else {
+		footer = m.muted.Render(truncate(scrollInfo+"↑↓ navigate  ·  enter select  ·  esc close", innerWidth))
+	}
 
 	content := strings.Join([]string{
 		topLine,

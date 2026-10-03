@@ -272,3 +272,88 @@ func TestModelSelectorMouseWheelScroll(t *testing.T) {
 		t.Fatalf("expected gpt-4o after wheel up, got %+v", selected)
 	}
 }
+
+func TestProviderSelectorCustomEditKey(t *testing.T) {
+	selector := selectors.NewProviderSelector([]selectors.Provider{
+		{ID: "gemini", Name: "Google Gemini", Description: "Gemini models"},
+		{ID: "openai-compatible:local", Name: "local (Custom)", Description: "configured", Custom: true},
+	}, theme.Default())
+	selector.SetSize(80, 24)
+
+	// Navigate to custom provider
+	updated, _ := selector.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	selector = updated.(selectors.ProviderSelector)
+
+	view := selector.View().Content
+	if !strings.Contains(view, "e edit") || !strings.Contains(view, "d delete") {
+		t.Fatalf("expected custom provider footer to show edit and delete shortcuts, got:\n%s", view)
+	}
+
+	// Press 'e' to edit
+	updated, cmd := selector.Update(tea.KeyPressMsg{Text: "e", Code: 'e'})
+	selector = updated.(selectors.ProviderSelector)
+	if cmd == nil {
+		t.Fatal("expected command from pressing 'e'")
+	}
+	msg := cmd()
+	editMsg, ok := msg.(selectors.ProviderEditMsg)
+	if !ok || editMsg.ID != "openai-compatible:local" {
+		t.Fatalf("expected ProviderEditMsg for local, got: %#v", msg)
+	}
+}
+
+func TestProviderSelectorCustomDeleteConfirmation(t *testing.T) {
+	selector := selectors.NewProviderSelector([]selectors.Provider{
+		{ID: "gemini", Name: "Google Gemini", Description: "Gemini models", Active: true},
+		{ID: "openai-compatible:local", Name: "local (Custom)", Description: "configured", Custom: true},
+	}, theme.Default())
+	selector.SetSize(80, 24)
+
+	// Move to custom provider
+	updated, _ := selector.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	selector = updated.(selectors.ProviderSelector)
+
+	// Press 'd' to initiate deletion
+	updated, cmd := selector.Update(tea.KeyPressMsg{Text: "d", Code: 'd'})
+	selector = updated.(selectors.ProviderSelector)
+	if cmd != nil {
+		t.Fatal("expected no immediate command on 'd', should prompt first")
+	}
+
+	view := selector.View().Content
+	if !strings.Contains(view, "Are you sure you want to delete") || !strings.Contains(view, "y/n") {
+		t.Fatalf("expected confirmation prompt in view, got:\n%s", view)
+	}
+
+	// Press 'y' to confirm
+	updated, cmd = selector.Update(tea.KeyPressMsg{Text: "y", Code: 'y'})
+	selector = updated.(selectors.ProviderSelector)
+	if cmd == nil {
+		t.Fatal("expected command after confirming with 'y'")
+	}
+	msg := cmd()
+	delMsg, ok := msg.(selectors.ProviderDeleteMsg)
+	if !ok || delMsg.ID != "openai-compatible:local" {
+		t.Fatalf("expected ProviderDeleteMsg for local, got: %#v", msg)
+	}
+}
+
+func TestProviderSelectorActiveCustomDeleteBlocked(t *testing.T) {
+	selector := selectors.NewProviderSelector([]selectors.Provider{
+		{ID: "openai-compatible:active", Name: "active (Custom)", Description: "configured", Active: true, Custom: true},
+		{ID: "gemini", Name: "Google Gemini", Description: "Gemini models"},
+	}, theme.Default())
+	selector.SetSize(80, 24)
+
+	// Press 'd' on active custom provider
+	updated, cmd := selector.Update(tea.KeyPressMsg{Text: "d", Code: 'd'})
+	selector = updated.(selectors.ProviderSelector)
+	if cmd != nil {
+		t.Fatal("expected no command when trying to delete active provider")
+	}
+
+	view := selector.View().Content
+	if !strings.Contains(view, "Cannot delete the active provider") {
+		t.Fatalf("expected warning message about active provider, got:\n%s", view)
+	}
+}

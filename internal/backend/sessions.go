@@ -48,6 +48,24 @@ func (s *Service) Initialize(ctx context.Context) (api.InitializeResult, error) 
 		}
 		result.Providers = append(result.Providers, provider)
 	}
+	for _, custom := range s.providers.CustomProviders() {
+		models := []api.Model(nil)
+		if custom.Model != "" {
+			models = []api.Model{{ID: custom.Model, Name: custom.Model}}
+		}
+		if custom.ID == providerName && len(currentModels) > 0 {
+			models = currentModels
+		}
+		result.Providers = append(result.Providers, api.Provider{
+			ID:               custom.ID,
+			Name:             custom.Name,
+			Configured:       true,
+			Endpoint:         publicEndpoint(custom.Endpoint),
+			RequiresEndpoint: true,
+			Custom:           true,
+			Models:           models,
+		})
+	}
 	return result, nil
 }
 

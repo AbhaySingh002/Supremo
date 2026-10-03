@@ -58,3 +58,84 @@ func TestCustomCredentialSetupBuildsNamedOpenAICompatibleRoute(t *testing.T) {
 		t.Fatalf("custom credential message = %#v", msg)
 	}
 }
+
+func TestCustomCredentialEditPreFillsValues(t *testing.T) {
+	styles := newTestModel(api.Session{}, context.Background(), func() {}).styles
+	provider := api.Provider{
+		ID:       "openai-compatible:omniroute",
+		Name:     "omniroute (Custom)",
+		Endpoint: "https://api.omniroute.io/v1",
+		Models:   []api.Model{{ID: "claude-3-7-sonnet"}},
+		Custom:   true,
+	}
+
+	setup := newCustomCredentialEditSetup(provider, styles)
+	if setup.oldProvider != "openai-compatible:omniroute" {
+		t.Fatalf("expected oldProvider openai-compatible:omniroute, got %q", setup.oldProvider)
+	}
+	if setup.name.Value() != "omniroute" {
+		t.Fatalf("expected name omniroute, got %q", setup.name.Value())
+	}
+	if setup.endpoint.Value() != "https://api.omniroute.io/v1" {
+		t.Fatalf("expected endpoint https://api.omniroute.io/v1, got %q", setup.endpoint.Value())
+	}
+	if setup.model.Value() != "claude-3-7-sonnet" {
+		t.Fatalf("expected model claude-3-7-sonnet, got %q", setup.model.Value())
+	}
+
+	// Submit with empty key (should keep existing key)
+	setup.step = credentialModel
+	cmd := setup.submit()
+	if cmd == nil {
+		t.Fatal("expected submit command")
+	}
+	msg, ok := cmd().(credentialSubmittedMsg)
+	if !ok {
+		t.Fatalf("unexpected msg: %T", cmd())
+	}
+	if msg.oldProvider != "openai-compatible:omniroute" || msg.provider != "openai-compatible:omniroute" {
+		t.Fatalf("expected provider match, got: %#v", msg)
+	}
+}
+
+func TestProviderDeleteCommand(t *testing.T) {
+	client := &behaviorClient{}
+	ctx := context.Background()
+	model := New(client, ".", "chat", Options{})
+
+	cmd := executeCommandCmd(ctx, client, model.registry, api.Session{ID: "session-1"}, "/provider delete omniroute", 1)
+	if cmd == nil {
+		t.Fatal("expected command from executeCommandCmd")
+	}
+	result := cmd().(commandResultMsg)
+	if result.err != nil {
+		t.Fatalf("execute error: %v", result.err)
+	}
+	if client.deleted.Provider != "openai-compatible:omniroute" {
+		t.Fatalf("expected deleted provider openai-compatible:omniroute, got %q", client.deleted.Provider)
+	}
+	if !strings.Contains(result.output, "Deleted custom provider omniroute") {
+		t.Fatalf("unexpected output: %q", result.output)
+	}
+}
+
+func TestCustomProviderRetainedInOptionsWhenNotActive(t *testing.T) {
+	model := newTestModel(api.Session{}, context.Background(), func() {})
+	model.provider = "gemini" // Active provider is gemini!
+	model.providers = []api.Provider{
+		{ID: "gemini", Name: "Google Gemini", Configured: true},
+		{ID: "openai-compatible:omniroute", Name: "omniroute (Custom)", Configured: true, Endpoint: "http://localhost:8000/v1", Custom: true},
+	}
+
+	options := model.providerOptions()
+	found := false
+	for _, opt := range options {
+		if opt.ID == "openai-compatible:omniroute" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("custom provider omniroute was not retained in provider options when active provider was gemini! Options: %#v", options)
+	}
+}

@@ -98,8 +98,15 @@ func (s *Service) ListModels(ctx context.Context, request api.ListModelsRequest)
 
 func (s *Service) ConfigureProvider(ctx context.Context, request api.ConfigureProviderRequest) (api.InitializeResult, error) {
 	if err := s.providers.Configure(ctx, providers.ConfigurationUpdate{
-		Provider: request.Provider, Model: request.Model, Endpoint: request.Endpoint, APIKey: request.APIKey, Verify: request.Verify,
+		Provider: request.Provider, OldProvider: request.OldProvider, Model: request.Model, Endpoint: request.Endpoint, APIKey: request.APIKey, Verify: request.Verify,
 	}); err != nil {
+		return api.InitializeResult{}, err
+	}
+	return s.Initialize(ctx)
+}
+
+func (s *Service) DeleteProvider(ctx context.Context, request api.DeleteProviderRequest) (api.InitializeResult, error) {
+	if err := s.providers.DeleteProvider(ctx, request.Provider); err != nil {
 		return api.InitializeResult{}, err
 	}
 	return s.Initialize(ctx)

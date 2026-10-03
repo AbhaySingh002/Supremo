@@ -353,3 +353,132 @@ func TestRuntimeOverridesDoNotPersist(t *testing.T) {
 		t.Fatalf("runtime override changed credentials: key=%q err=%v", storedKey, err)
 	}
 }
+
+func TestCustomProviderRetentionOnSwitch(t *testing.T) {
+	dir := t.TempDir()
+	store := NewFileCredentialStore(dir)
+	if err := store.SetAPIKey("gemini", "stored-key"); err != nil {
+		t.Fatal(err)
+	}
+	manager := newBuiltinManager(t, dir, store)
+	if err := manager.Initialize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	customID := "openai-compatible:ollama"
+	endpoint := "http://localhost:11434/v1"
+	model := "llama3.2"
+	key := "ollama-key"
+	if err := manager.Configure(context.Background(), ConfigurationUpdate{
+		Provider: &customID, Endpoint: &endpoint, Model: &model, APIKey: &key,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	customs := manager.CustomProviders()
+	if len(customs) != 1 || customs[0].ID != customID {
+		t.Fatalf("expected custom provider to be listed, got: %#v", customs)
+	}
+
+	// Switch to gemini
+	gemini := "gemini"
+	if err := manager.Configure(context.Background(), ConfigurationUpdate{Provider: &gemini}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify custom provider is retained even after switching away!
+	customsAfterSwitch := manager.CustomProviders()
+	if len(customsAfterSwitch) != 1 || customsAfterSwitch[0].ID != customID {
+		t.Fatalf("custom provider vanished after switching to gemini: %#v", customsAfterSwitch)
+	}
+}
+
+func TestDeleteCustomProvider(t *testing.T) {
+	dir := t.TempDir()
+	store := NewFileCredentialStore(dir)
+	if err := store.SetAPIKey("gemini", "stored-key"); err != nil {
+		t.Fatal(err)
+	}
+	manager := newBuiltinManager(t, dir, store)
+	if err := manager.Initialize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	customID := "openai-compatible:local"
+	endpoint := "http://localhost:11434/v1"
+	model := "llama3.2"
+	if err := manager.Configure(context.Background(), ConfigurationUpdate{
+		Provider: &customID, Endpoint: &endpoint, Model: &model,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Deleting the active provider must fail
+	if err := manager.DeleteProvider(context.Background(), customID); err == nil {
+		t.Fatal("expected error deleting active custom provider")
+	}
+
+	// Switch to gemini first
+	gemini := "gemini"
+	if err := manager.Configure(context.Background(), ConfigurationUpdate{Provider: &gemini}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Now delete succeeds
+	if err := manager.DeleteProvider(context.Background(), customID); err != nil {
+		t.Fatalf("failed to delete custom provider: %v", err)
+	}
+
+	if len(manager.CustomProviders()) != 0 {
+		t.Fatalf("expected 0 custom providers, got: %#v", manager.CustomProviders())
+	}
+	if _, ok := manager.config.Endpoints[customID]; ok {
+		t.Fatal("endpoint not removed from config")
+	}
+}
+
+func TestRenameCustomProvider(t *testing.T) {
+	dir := t.TempDir()
+	store := NewFileCredentialStore(dir)
+	if err := store.SetAPIKey("gemini", "stored-key"); err != nil {
+		t.Fatal(err)
+	}
+	manager := newBuiltinManager(t, dir, store)
+	if err := manager.Initialize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	oldID := "openai-compatible:v1"
+	endpoint := "http://localhost:11434/v1"
+	model := "llama3.2"
+	key := "my-secret-key"
+	if err := manager.Configure(context.Background(), ConfigurationUpdate{
+		Provider: &oldID, Endpoint: &endpoint, Model: &model, APIKey: &key,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	newID := "openai-compatible:v2"
+	newModel := "llama3.3"
+	// Rename: omit APIKey so it inherits oldID's key, specify OldProvider
+	if err := manager.Configure(context.Background(), ConfigurationUpdate{
+		Provider: &newID, OldProvider: &oldID, Endpoint: &endpoint, Model: &newModel,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Old provider should be deleted
+	if _, ok := manager.config.Endpoints[oldID]; ok {
+		t.Fatal("old provider endpoint was not removed")
+	}
+	oldKey, _ := store.GetAPIKey(oldID)
+	if oldKey != "" {
+		t.Fatalf("old key was not deleted: %q", oldKey)
+	}
+
+	// New provider should exist with inherited key
+	newKey, err := store.GetAPIKey(newID)
+	if err != nil || newKey != "my-secret-key" {
+		t.Fatalf("expected inherited key %q, got %q (%v)", "my-secret-key", newKey, err)
+	}
+}

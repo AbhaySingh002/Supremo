@@ -70,6 +70,23 @@ func (s *FileCredentialStore) SetAPIKey(provider string, apiKey string) error {
 	return s.save(creds)
 }
 
+// DeleteAPIKey removes the key for a provider.
+func (s *FileCredentialStore) DeleteAPIKey(provider string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	creds, err := s.load()
+	if err != nil {
+		return err
+	}
+
+	if creds.APIKeys != nil {
+		delete(creds.APIKeys, provider)
+	}
+
+	return s.save(creds)
+}
+
 func (s *FileCredentialStore) load() (*Credentials, error) {
 	data, err := os.ReadFile(s.filePath)
 	if err != nil {

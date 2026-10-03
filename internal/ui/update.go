@@ -679,7 +679,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case credentialSubmittedMsg:
 		provider, key := msg.provider, msg.key
-		request := api.ConfigureProviderRequest{Provider: &provider, APIKey: &key, Verify: true}
+		request := api.ConfigureProviderRequest{Provider: &provider, Verify: true}
+		if key != "" || msg.oldProvider == "" {
+			request.APIKey = &key
+		}
+		if msg.oldProvider != "" {
+			oldProvider := msg.oldProvider
+			request.OldProvider = &oldProvider
+		}
 		if msg.endpoint != "" {
 			endpoint := msg.endpoint
 			request.Endpoint = &endpoint
@@ -723,6 +730,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setStatus("Using " + m.provider + " · " + m.modelName)
 		m.layout()
 		return m, m.restoreFocus()
+	case providerDeletedMsg:
+		m.catalogBusy = false
+		if msg.err != nil {
+			m.surface, m.providerSelector, m.modelSelector = surfaceNone, nil, nil
+			m.appendEntry(entryError, "Failed to delete provider: "+msg.err.Error())
+			m.layout()
+			return m, m.restoreFocus()
+		}
+		m.applyInitialize(msg.initialize)
+		name := strings.TrimPrefix(msg.provider, "openai-compatible:")
+		m.appendEntry(entryStatus, "Deleted custom provider "+name+".")
+		m.openProviderSelector()
+		return m, nil
 	case tea.KeyPressMsg:
 		return m.updateKey(msg)
 	case tea.PasteMsg:
@@ -773,6 +793,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.surface, m.catalogBusy = surfaceModel, true
 		providerID, modelID := msg.ProviderID, msg.ID
 		return m, tea.Batch(configureProviderCmd(m.ctx, m.client, api.ConfigureProviderRequest{Provider: &providerID, Model: &modelID}, false), m.startSpinner())
+	case selectors.ProviderEditMsg:
+		provider, ok := m.providerChoice(msg.ID)
+		if !ok {
+			return m, nil
+		}
+		return m, m.openCustomCredentialEdit(provider)
+	case selectors.ProviderDeleteMsg:
+		m.surface, m.catalogBusy = surfaceProvider, true
+		return m, tea.Batch(deleteProviderCmd(m.ctx, m.client, msg.ID), m.startSpinner())
 	case selectors.CommandQueryMsg:
 		if m.paletteOpen {
 			updated, cmd := m.palette.Update(msg)

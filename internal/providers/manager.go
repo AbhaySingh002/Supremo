@@ -45,11 +45,20 @@ type CatalogProvider struct {
 
 // ConfigurationUpdate stages one provider runtime change before it is persisted.
 type ConfigurationUpdate struct {
-	Provider *string
-	Model    *string
-	Endpoint *string
-	APIKey   *string
-	Verify   bool
+	Provider    *string
+	OldProvider *string
+	Model       *string
+	Endpoint    *string
+	APIKey      *string
+	Verify      bool
+}
+
+// CustomProvider represents a configured custom route provider.
+type CustomProvider struct {
+	ID       string
+	Name     string
+	Endpoint string
+	Model    string
 }
 
 func NewManager(configDir string, credStore *FileCredentialStore, registry *Registry) (*Manager, error) {
@@ -105,6 +114,44 @@ func (m *Manager) Providers() []ProviderRegistration {
 	return m.registry.Registrations()
 }
 
+// CustomProviders returns all configured custom route providers.
+func (m *Manager) CustomProviders() []CustomProvider {
+	if m == nil {
+		return nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.config == nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var ids []string
+	for id := range m.config.Endpoints {
+		if anonymousOpenAICompatibleRoute(id) && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	for id := range m.config.Models {
+		if anonymousOpenAICompatibleRoute(id) && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	result := make([]CustomProvider, 0, len(ids))
+	for _, id := range ids {
+		rawName := strings.TrimPrefix(id, "openai-compatible:")
+		result = append(result, CustomProvider{
+			ID:       id,
+			Name:     rawName + " (Custom)",
+			Endpoint: m.config.Endpoints[id],
+			Model:    m.config.Models[id],
+		})
+	}
+	return result
+}
+
 func (m *Manager) providerRegistration(providerName string) (ProviderRegistration, error) {
 	if m == nil || m.registry == nil {
 		return ProviderRegistration{}, fmt.Errorf("provider registry is not initialized")
@@ -133,7 +180,17 @@ func (m *Manager) ModelInfo() (string, string) {
 
 // ProviderConfigured reports credential presence without exposing the value.
 func (m *Manager) ProviderConfigured(providerName string) bool {
-	if m == nil || m.credStore == nil {
+	if m == nil {
+		return false
+	}
+	if anonymousOpenAICompatibleRoute(providerName) {
+		m.mu.RLock()
+		defer m.mu.RUnlock()
+		if m.config != nil && m.config.Endpoints[providerName] != "" {
+			return true
+		}
+	}
+	if m.credStore == nil {
 		return false
 	}
 	key, err := m.credStore.GetAPIKey(providerName)
@@ -370,6 +427,11 @@ func (m *Manager) Configure(ctx context.Context, update ConfigurationUpdate) err
 	}
 	if update.APIKey != nil {
 		apiKey = *update.APIKey
+	} else if update.OldProvider != nil && *update.OldProvider != "" && *update.OldProvider != providerName && apiKey == "" && m.credStore != nil {
+		if oldKey, err := m.credStore.GetAPIKey(*update.OldProvider); err == nil && oldKey != "" {
+			apiKey = oldKey
+			update.APIKey = &apiKey
+		}
 	}
 	if err := validateProviderEndpoint(registration, endpoint); err != nil {
 		return err
@@ -400,10 +462,24 @@ func (m *Manager) Configure(ctx context.Context, update ConfigurationUpdate) err
 	nextConfig.Endpoints = maps.Clone(m.config.Endpoints)
 	nextConfig.ProviderName, nextConfig.Model, nextConfig.Endpoint = providerName, model, endpoint
 	nextConfig.Models[providerName], nextConfig.Endpoints[providerName] = model, endpoint
+	if update.OldProvider != nil && *update.OldProvider != "" && *update.OldProvider != providerName {
+		delete(nextConfig.Models, *update.OldProvider)
+		delete(nextConfig.Endpoints, *update.OldProvider)
+	}
 
 	nextCache := &metadataCache{Providers: maps.Clone(m.metadataCache.Providers)}
 	if update.Verify {
 		nextCache.Providers[cacheKey(providerName, endpoint)] = metadata
+	}
+	if update.OldProvider != nil && *update.OldProvider != "" && *update.OldProvider != providerName {
+		oldPrefix := *update.OldProvider + "@"
+		for k := range nextCache.Providers {
+			if strings.HasPrefix(k, oldPrefix) || k == *update.OldProvider {
+				delete(nextCache.Providers, k)
+			}
+		}
+	}
+	if update.Verify || (update.OldProvider != nil && *update.OldProvider != "" && *update.OldProvider != providerName) {
 		if err := saveMetadataCache(m.configDir, nextCache); err != nil {
 			return err
 		}
@@ -418,6 +494,9 @@ func (m *Manager) Configure(ctx context.Context, update ConfigurationUpdate) err
 			return err
 		}
 	}
+	if update.OldProvider != nil && *update.OldProvider != "" && *update.OldProvider != providerName && m.credStore != nil {
+		_ = m.credStore.DeleteAPIKey(*update.OldProvider)
+	}
 	if err := SaveConfig(m.configDir, &nextConfig); err != nil {
 		if update.APIKey != nil {
 			return errors.Join(err, m.credStore.SetAPIKey(providerName, oldKey))
@@ -426,11 +505,64 @@ func (m *Manager) Configure(ctx context.Context, update ConfigurationUpdate) err
 	}
 
 	m.config = &nextConfig
-	if update.Verify {
-		m.metadataCache = nextCache
-	}
+	m.metadataCache = nextCache
 	runtime.providerName, runtime.model, runtime.endpoint, runtime.apiKey = providerName, model, endpoint, apiKey
 	runtime.activeClient, runtime.metadata = client, metadata
+	return nil
+}
+
+// DeleteProvider removes a configured custom provider.
+func (m *Manager) DeleteProvider(ctx context.Context, providerName string) error {
+	if m == nil {
+		return fmt.Errorf("manager is required")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.runtimeConfig == nil || m.config == nil {
+		return fmt.Errorf("manager not initialized")
+	}
+	providerName = strings.TrimSpace(providerName)
+	if !anonymousOpenAICompatibleRoute(providerName) {
+		return fmt.Errorf("only custom providers can be deleted")
+	}
+	runtime := m.runtimeConfig
+	runtime.mu.RLock()
+	activeProvider := runtime.providerName
+	runtime.mu.RUnlock()
+	if activeProvider == providerName || m.config.ProviderName == providerName {
+		return fmt.Errorf("cannot delete the active provider. Switch first with /provider")
+	}
+
+	nextConfig := *m.config
+	nextConfig.Models = maps.Clone(m.config.Models)
+	nextConfig.Endpoints = maps.Clone(m.config.Endpoints)
+	delete(nextConfig.Models, providerName)
+	delete(nextConfig.Endpoints, providerName)
+
+	if err := SaveConfig(m.configDir, &nextConfig); err != nil {
+		return err
+	}
+	m.config = &nextConfig
+
+	if m.credStore != nil {
+		_ = m.credStore.DeleteAPIKey(providerName)
+	}
+
+	if m.metadataCache != nil {
+		nextCache := &metadataCache{Providers: maps.Clone(m.metadataCache.Providers)}
+		changed := false
+		prefix := providerName + "@"
+		for k := range nextCache.Providers {
+			if strings.HasPrefix(k, prefix) || k == providerName {
+				delete(nextCache.Providers, k)
+				changed = true
+			}
+		}
+		if changed {
+			_ = saveMetadataCache(m.configDir, nextCache)
+			m.metadataCache = nextCache
+		}
+	}
 	return nil
 }
 
