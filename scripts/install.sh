@@ -106,11 +106,13 @@ download_with_progress() {
 
   step "Downloading $label..."
 
-  headers_file="$TMP_DIR/headers.$$.txt"
-  total_bytes=0
+  # Get Content-Length if available
+  total_bytes=$(curl -sLI "$url" | awk -F': ' 'tolower($1)=="content-length"{val=$2} END{print val}' | tr -d '\r\n')
+  case "$total_bytes" in
+    ''|*[!0-9]*) total_bytes=0 ;;
+  esac
 
-  # Start downloading immediately — headers are captured concurrently
-  curl -fsSL --connect-timeout 15 -D "$headers_file" "$url" -o "$dest" &
+  curl -fsSL --connect-timeout 15 "$url" -o "$dest" &
   curl_pid=$!
 
   bar_width=24
@@ -123,15 +125,6 @@ download_with_progress() {
         cur_bytes=0
       fi
       cur_bytes=$(printf "%d" "$cur_bytes" 2>/dev/null || printf 0)
-
-      # Extract Content-Length from headers as soon as available
-      if [ "$total_bytes" -le 0 ] && [ -s "$headers_file" ]; then
-        parsed_bytes=$(awk -F': ' 'tolower($1)=="content-length"{val=$2} END{print val}' "$headers_file" 2>/dev/null | tr -d '\r\n' || true)
-        case "$parsed_bytes" in
-          ''|*[!0-9]*) : ;;
-          *) total_bytes="$parsed_bytes" ;;
-        esac
-      fi
 
       if [ "$total_bytes" -gt 0 ]; then
         pct=$(( cur_bytes * 100 / total_bytes ))
@@ -168,7 +161,6 @@ download_with_progress() {
   fi
 
   wait "$curl_pid" || fail "Download failed for $label"
-  rm -f "$headers_file" 2>/dev/null || true
   success "Downloaded $label"
 }
 
