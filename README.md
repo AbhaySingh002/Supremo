@@ -19,28 +19,34 @@
 
 ### Install
 
+#### macOS & Linux &nbsp; ![macOS](https://img.shields.io/badge/-macOS-black?style=flat-square&logo=apple&logoColor=white) ![Linux](https://img.shields.io/badge/-Linux-FCC624?style=flat-square&logo=linux&logoColor=black)
+
 ```sh
-# macOS & Linux
 curl -fsSL https://raw.githubusercontent.com/AbhaySingh002/Supremo/main/scripts/install.sh | sh
 ```
 
+#### Windows &nbsp; ![Windows](https://img.shields.io/badge/-Windows-0078D6?style=flat-square&logo=windows&logoColor=white) ![PowerShell](https://img.shields.io/badge/-PowerShell-5391FE?style=flat-square&logo=powershell&logoColor=white)
+
 ```powershell
-# Windows (PowerShell)
 irm https://raw.githubusercontent.com/AbhaySingh002/Supremo/main/scripts/install.ps1 | iex
 ```
 
 <details>
 <summary><strong>Build via Go or from Source</strong></summary>
+<br />
+
+#### Go 1.24+ &nbsp; ![Go](https://img.shields.io/badge/-Go%201.24+-00ADD8?style=flat-square&logo=go&logoColor=white)
 
 ```sh
-# Go 1.24+
 go install github.com/AbhaySingh002/supremo/cmd/supremo@latest
 ```
 
+#### From Source &nbsp; ![Source Build](https://img.shields.io/badge/-Source%20Build-E5A93C?style=flat-square&logo=git&logoColor=white)
+
 ```sh
-# From Source
 git clone https://github.com/AbhaySingh002/Supremo.git && cd Supremo && make build
 ```
+
 </details>
 
 ---
